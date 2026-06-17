@@ -2,6 +2,17 @@
 
 Pickup notes for continuing AUSeq. Read this first.
 
+## ▶ v2.1 (AstroLab fork) — feature playground (THIS repo)
+
+This is the **v2.1 fork** where features get experimented on. **v1.0 (`~/auseq`) is FROZEN — never touch it.** Theme = AstroLab (teal/mint, light oak cheeks).
+
+Cross-pollination with Legion Stage (`stage-ipad`) is underway. Done in v2.1 so far:
+- **Beat-native engine** (from Stage): `Sequencer` stores all musical time in beats, re-bases the wall clock on tempo changes → tempo-independent, drift-free, persistence-ready.
+- **Broadened MIDI** (Stage has no real MIDI 2.0 — it's legacy MIDI 1.0 over `MIDIPacketList`; AUSeq is already on the modern UMP API): parse + forward **poly/channel aftertouch, program change** to the track instrument; **system real-time Start/Continue/Stop** drives the sequencer transport.
+- **Song save/load** (`SongStore.swift` Codable → `Documents/auseq-song.json`): transport/grid settings + per-track instrument identity (`AudioComponentDescription`) + full AU patch (`fullState`, plist→Data) + mixer + all notes. Top-bar **folder menu** = Save / Open Last Song. Instruments re-instantiate out-of-process and reapply state on load.
+
+**Next in the cross-ref plan:** Pass 1 → scenes / clip-launch (from Stage). Pass 2 → port AUSeq's ripple cut/copy/erase/paste into `stage-ipad`'s arranger (**flag before modifying that separate project**). Deferred: true MIDI 2.0 high-res ("option A") — left as a scoped decision since it touches the working KeyLab MCU decode + AU output path.
+
 ## ▶ v1.0 SHIPPED (2026-06-16)
 
 AUSeq v1.0 is on Paddy and feature-complete for a first release. Two bug-review passes done + fixes applied. What works end-to-end:
