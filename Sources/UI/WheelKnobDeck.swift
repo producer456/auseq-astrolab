@@ -20,7 +20,9 @@ struct WheelKnobDeck: View {
         if let au = model.selectedAU {
             BoundKnobDeck(au: au, model: model, tone: tone, wheelSize: wheelSize,
                           knobSize: knobSize, spacing: spacing, reservedHeight: reservedHeight)
-                .id(model.selectedTrackID)   // rebuild the param VM when the track changes
+                // Rebuild the param VM when the AU instance changes — i.e. on track
+                // change AND when a different plugin is loaded onto the same track.
+                .id(ObjectIdentifier(au))
         } else {
             HStack(alignment: .center, spacing: spacing) {
                 ForEach(0..<4, id: \.self) { _ in emptyWell }
