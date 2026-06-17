@@ -6,6 +6,7 @@ import SwiftUI
 struct ArrangeView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var seq: Sequencer
+    var onEditTracks: () -> Void = {}   // open full per-track controls
 
     private let headerWidth: CGFloat = 116
     private let laneHeight: CGFloat = 46
@@ -35,8 +36,19 @@ struct ArrangeView: View {
                             rulerHeaderCell.frame(height: rulerHeight)
                             ForEach(model.tracks) { track in
                                 LaneHeaderView(track: track, isSelected: track.id == model.selectedTrackID,
-                                               onSelect: { model.select(track) })
+                                               onSelect: { model.select(track) },
+                                               onEdit: onEditTracks)
                                     .frame(width: headerWidth, height: laneHeight)
+                            }
+                            Button { model.addTrack() } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "plus").font(.system(size: 12, weight: .bold))
+                                    Text("ADD TRACK").etchedLabel(8, weight: .bold)
+                                }
+                                .foregroundStyle(Theme.orange)
+                                .frame(width: headerWidth, height: 30)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.25)))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.gold.opacity(0.4)))
                             }
                         }
                         .frame(width: headerWidth)
@@ -125,6 +137,7 @@ private struct LaneHeaderView: View {
     @ObservedObject var track: Track
     let isSelected: Bool
     let onSelect: () -> Void
+    var onEdit: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
@@ -134,13 +147,16 @@ private struct LaneHeaderView: View {
                 Text(track.instrumentName).etchedLabel(7, soft: true, weight: .medium).lineLimit(1)
             }
             Spacer(minLength: 0)
+            if track.armed {
+                Circle().fill(Color.red).frame(width: 6, height: 6)   // record-armed indicator
+            }
         }
         .padding(.horizontal, 8)
         .frame(maxHeight: .infinity)
         .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Theme.orange.opacity(0.12) : Color.white.opacity(0.25)))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(isSelected ? Theme.orange : Theme.gold.opacity(0.3), lineWidth: isSelected ? 1.5 : 1))
         .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
+        .onTapGesture { isSelected ? onEdit() : onSelect() }   // tap selects; tap selected again = controls
     }
 }
 

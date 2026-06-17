@@ -95,15 +95,11 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 woodPanel
                 panelGroove
-                HStack(spacing: 0) {
-                    TrackRail(model: model, onExpand: { showingTracks = true })
-                    Rectangle().fill(.black.opacity(0.18)).frame(width: 2)   // machined seam
-                    contentColumn
-                }
-                .recessedPanel(radius: 16)                                   // display module sunk into the chassis
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, keyboardVisible ? 6 : 12)
+                contentColumn
+                    .recessedPanel(radius: 16)                               // display module sunk into the chassis
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, keyboardVisible ? 6 : 12)
                 if keyboardVisible {
                     PianoKeyboardView(model: model, height: 190)
                         .padding(.horizontal, 12).padding(.bottom, 12)
@@ -135,7 +131,7 @@ struct ContentView: View {
     /// The content area below the wood control panel — the arranger fills it now
     /// that the parameters live as knobs in the wood.
     private var contentColumn: some View {
-        ArrangeView(model: model, seq: model.sequencer)
+        ArrangeView(model: model, seq: model.sequencer, onEditTracks: { showingTracks = true })
     }
 
     /// Brushed-aluminium faceplate fill (no safe-area bleed — it's inset in the bezel).
