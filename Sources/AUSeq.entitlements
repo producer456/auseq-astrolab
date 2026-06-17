@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for an AUv3 *host*: without it AVAudioUnitComponentManager
+	     hides third-party instrument AUv3s (only Apple built-ins show). -->
+	<key>inter-app-audio</key>
+	<true/>
+</dict>
+</plist>

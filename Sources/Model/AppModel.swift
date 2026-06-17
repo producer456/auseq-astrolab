@@ -1,0 +1,281 @@
+import Foundation
+import SwiftUI
+import AVFoundation
+import AudioToolbox
+
+/// Top-level app state: tracks, selection, and the live wiring between the
+/// MIDI input, the on-screen keyboard, and the audio host.
+@MainActor
+final class AppModel: ObservableObject {
+
+    @Published var tracks: [Track] = []
+    @Published var selectedTrackID: UUID? { didSet { updateSelectLEDs() } }
+
+    let audio = AudioEngine()
+    let midi = MIDIManager()
+    let browser = AUComponentBrowser()
+    let sequencer = Sequencer()
+
+    private let palette: [Color] = [.blue, .pink, .green, .orange, .purple, .teal, .yellow, .red]
+
+    init() {
+        addTrack()
+        audio.start()
+        browser.refresh()
+
+        midi.onMessage = { [weak self] message, source in
+            self?.handleIncoming(message, from: source)
+        }
+        midi.start()
+        updateSelectLEDs()   // output port exists now; reflect the initial selection
+
+        // Sequencer playback → instrument; recording lands on the selected track.
+        sequencer.recordTrackID = { [weak self] in
+            guard let self else { return nil }
+            return self.tracks.first { $0.armed }?.id ?? self.selectedTrackID
+        }
+        sequencer.onBeat = { [weak self] downbeat in
+            guard let self else { return }
+            // Always click during the count-in, even if the metronome is off.
+            if self.sequencer.metronomeOn || self.sequencer.isCountingIn {
+                self.audio.click(downbeat: downbeat)
+            }
+        }
+        sequencer.onEvent = { [weak self] event, trackID in
+            guard let self else { return }
+            let channel = self.tracks.first { $0.id == trackID }?.midiChannel ?? 0
+            if event.isOn {
+                self.audio.noteOn(event.note, velocity: event.velocity, channel: channel, to: trackID)
+            } else {
+                self.audio.noteOff(event.note, channel: channel, to: trackID)
+            }
+        }
+    }
+
+    var selectedTrack: Track? {
+        tracks.first { $0.id == selectedTrackID }
+    }
+
+    /// The hosted AUAudioUnit for the selected track, if it has one loaded.
+    var selectedAU: AUAudioUnit? {
+        guard let track = selectedTrack else { return nil }
+        return audio.auAudioUnit(for: track.id)
+    }
+
+    // MARK: - Track management
+
+    @discardableResult
+    func addTrack() -> Track {
+        let color = palette[tracks.count % palette.count]
+        let track = Track(name: "Track \(tracks.count + 1)", color: color)
+        tracks.append(track)
+        selectedTrackID = track.id
+        setArmed(track)        // new track is selected → auto-armed
+        return track
+    }
+
+    func removeTrack(_ track: Track) {
+        audio.removeTrack(track.id)
+        tracks.removeAll { $0.id == track.id }
+        if selectedTrackID == track.id { selectedTrackID = tracks.first?.id }
+    }
+
+    func select(_ track: Track) {
+        selectedTrackID = track.id
+        paramBank = 0
+        setArmed(track)        // selected track auto-arms (single-arm)
+    }
+
+    private func setArmed(_ track: Track) {
+        for t in tracks { t.armed = (t.id == track.id) }
+    }
+
+    func quantizeSelected() {
+        if let id = selectedTrackID { sequencer.quantize(id) }
+    }
+
+    func quantizeAll() {
+        for t in tracks { sequencer.quantize(t.id) }
+    }
+
+    // MARK: - Arranger edits (operate on the current selection)
+
+    func editCut()   { sequencer.cutSelection(allTrackIDs: tracks.map { $0.id }) }
+    func editCopy()  { sequencer.copySelection(allTrackIDs: tracks.map { $0.id }) }
+    func editErase() { sequencer.eraseSelection(allTrackIDs: tracks.map { $0.id }) }
+    func editPaste() { sequencer.pasteClipboard(selectedTrackID: selectedTrackID) }
+
+    // MARK: - Encoder bank paging (9 encoders → a page of 9 params)
+
+    static let encoderCount = 9
+    /// Which page of parameters the KeyLab encoders currently drive.
+    @Published var paramBank = 0
+
+    var paramCount: Int { selectedAU?.parameterTree?.allParameters.count ?? 0 }
+    var bankCount: Int { max(1, Int(ceil(Double(paramCount) / Double(Self.encoderCount)))) }
+
+    func pageBank(_ delta: Int) {
+        paramBank = max(0, min(bankCount - 1, paramBank + delta))
+    }
+
+    func assignInstrument(_ component: AVAudioUnitComponent, to track: Track) {
+        diag("app", "load '\(component.name)' → \(track.name)")
+        audio.loadInstrument(component, for: track.id) { [weak self] name in
+            track.instrumentName = name
+            track.hasInstrument = true
+            self?.paramBank = 0
+            // ContentView observes AppModel, not the individual Track, so the
+            // async load completing on a Track doesn't refresh it. Nudge AppModel
+            // to re-render now that the AU exists (otherwise the plugin controls
+            // only appear after switching tracks away and back).
+            self?.objectWillChange.send()
+        }
+    }
+
+    func setVolume(_ value: Float, for track: Track) {
+        track.volume = value
+        audio.setVolume(track.muted ? 0 : value, for: track.id)
+    }
+
+    func toggleMute(_ track: Track) {
+        track.muted.toggle()
+        audio.setVolume(track.muted ? 0 : track.volume, for: track.id)
+    }
+
+    /// Record-arm a track (single-arm: arming one disarms the rest, and selects
+    /// it so the keyboard plays the track you're recording onto).
+    func toggleArm(_ track: Track) {
+        let newState = !track.armed
+        for t in tracks { t.armed = false }
+        track.armed = newState
+        if newState { select(track) }
+        objectWillChange.send()
+        diag("app", "arm \(track.name) = \(newState)")
+    }
+
+    // MARK: - Live input routing (keyboard + MIDI in)
+
+    /// Which track each currently-held note was started on, so the note-off goes
+    /// to the same track even if you switch tracks while holding a key.
+    private var liveNoteTrack: [UInt8: UUID] = [:]
+
+    func playNoteOn(_ note: UInt8, velocity: UInt8) {
+        guard let track = selectedTrack else { return }
+        liveNoteTrack[note] = track.id
+        audio.noteOn(note, velocity: velocity, channel: track.midiChannel, to: track.id)
+        sequencer.recordNoteOn(note, velocity: velocity)
+    }
+
+    func playNoteOff(_ note: UInt8) {
+        let trackID = liveNoteTrack[note] ?? selectedTrackID
+        liveNoteTrack[note] = nil
+        if let trackID {
+            let channel = tracks.first { $0.id == trackID }?.midiChannel ?? 0
+            audio.noteOff(note, channel: channel, to: trackID)
+        }
+        sequencer.recordNoteOff(note)
+    }
+
+    private func handleIncoming(_ message: MIDIMessage, from source: String) {
+        // The KeyLab's dedicated DAW/MCU port drives controls, not notes — route
+        // it away from the instrument so transport buttons don't play stray notes.
+        if isControlPort(source) {
+            handleController(message)
+            return
+        }
+        guard let track = selectedTrack else { return }
+        switch message {
+        case let .noteOn(note, velocity, _):
+            playNoteOn(note, velocity: velocity)       // shared path: routing, hung-note tracking, recording
+        case let .noteOff(note, _):
+            playNoteOff(note)
+        case let .controlChange(controller, value, _):
+            audio.controlChange(controller, value: value, channel: track.midiChannel, to: track.id)
+        case .pitchBend, .other:
+            break
+        }
+    }
+
+    private func isControlPort(_ name: String) -> Bool {
+        name.localizedCaseInsensitiveContains("daw")
+    }
+
+    // MARK: - KeyLab DAW-port controller (MCU)
+
+    /// Encoders 1–9 = CC 16…24 ch1, relative. Maps encoder N to the selected
+    /// track's parameter N (the same order shown in the parameter list).
+    private func handleController(_ message: MIDIMessage) {
+        switch message {
+        case let .controlChange(cc, value, _) where (16...24).contains(cc):
+            let index = Int(cc) - 16
+            let delta = value < 0x40 ? Int(value) : -(Int(value) - 0x40)   // MCU relative
+            nudgeParameter(index, by: delta)
+        case let .pitchBend(value, channel):
+            // MCU faders = pitch bend per channel → that track's volume.
+            setFaderVolume(channel: Int(channel), value: Float(value) / 16383.0)
+        case let .noteOn(note, velocity, _) where velocity > 0:
+            switch note {
+            case 49: pageBank(1)    // KeyLab "Next" → next page of params
+            case 48: pageBank(-1)   // KeyLab "Previous" → previous page
+            case 94: sequencer.play()          // MCU Play
+            case 93: sequencer.stop()          // MCU Stop
+            case 95: sequencer.toggleRecord()  // MCU Record
+            case 91: stepPreset(-1)            // MCU Rewind ◀◀ → previous preset
+            case 92: stepPreset(1)             // MCU Forward ▶▶ → next preset
+            case 24...31: selectTrackByIndex(Int(note) - 24)  // MCU Select buttons under faders
+            default: break          // fader touch (104), etc. ignored
+            }
+        default:
+            break
+        }
+    }
+
+    /// Fader (channel 0…8) → the matching track's volume.
+    private func setFaderVolume(channel: Int, value: Float) {
+        guard channel >= 0, channel < tracks.count else { return }
+        setVolume(value, for: tracks[channel])
+    }
+
+    /// Select button under fader N → make track N the selected track.
+    private func selectTrackByIndex(_ index: Int) {
+        guard index >= 0, index < tracks.count else { return }
+        select(tracks[index])
+        diag("ctrl", "KeyLab select → \(tracks[index].name)")
+    }
+
+    /// Step the selected plugin's factory preset (wraps around). Driven by the
+    /// KeyLab's ◀◀ / ▶▶ buttons; the on-screen preset menu reflects the change.
+    private func stepPreset(_ delta: Int) {
+        guard let au = selectedAU, let presets = au.factoryPresets, !presets.isEmpty else { return }
+        let curIdx = presets.firstIndex { $0.number == au.currentPreset?.number } ?? 0
+        let idx = ((curIdx + delta) % presets.count + presets.count) % presets.count
+        au.currentPreset = presets[idx]
+        paramBank = 0
+        objectWillChange.send()
+        diag("ctrl", "preset → \(presets[idx].name)")
+    }
+
+    /// Light the KeyLab's Select-button LED for the selected track (MCU feedback:
+    /// NoteOn the button's note, velocity 127 = on, 0 = off).
+    func updateSelectLEDs() {
+        let selected = tracks.firstIndex { $0.id == selectedTrackID }
+        for i in 0..<8 {
+            let on: UInt8 = (i == selected) ? 127 : 0
+            midi.send([0x90, UInt8(24 + i), on], toPortNamed: "DAW")
+        }
+    }
+
+    private func nudgeParameter(_ encoderIndex: Int, by delta: Int) {
+        guard delta != 0,
+              let au = selectedAU,
+              let params = au.parameterTree?.allParameters else { return }
+        let paramIndex = paramBank * Self.encoderCount + encoderIndex
+        guard paramIndex < params.count else { return }
+        let p = params[paramIndex]
+        let span = p.maxValue - p.minValue
+        guard span > 0 else { return }
+        let step = span / 64                          // ~64 ticks across the full range
+        let nv = min(p.maxValue, max(p.minValue, p.value + Float(delta) * step))
+        p.setValue(nv, originator: nil)               // nil → the param-list observer updates the UI
+    }
+}
