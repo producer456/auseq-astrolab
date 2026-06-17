@@ -6,7 +6,13 @@ enum MIDIMessage {
     case noteOff(note: UInt8, channel: UInt8)
     case controlChange(controller: UInt8, value: UInt8, channel: UInt8)
     case pitchBend(value: UInt16, channel: UInt8)
+    case polyAftertouch(note: UInt8, pressure: UInt8, channel: UInt8)
+    case channelAftertouch(pressure: UInt8, channel: UInt8)
+    case programChange(program: UInt8, channel: UInt8)
+    case transport(Transport)            // incoming MIDI clock transport
     case other
+
+    enum Transport { case start, `continue`, stop }
 }
 
 /// One captured raw MIDI message, tagged with its source port — for the M5
@@ -155,8 +161,9 @@ final class MIDIManager: ObservableObject {
     }
 
     private func parse(_ word: UInt32, source: String) {
-        // Only MIDI 1.0 channel-voice UMP messages (message type 0x2). On main.
-        guard (word >> 28) & 0xF == 0x2 else { return }
+        // MIDI 1.0 UMP: channel-voice (message type 0x2) or system (type 0x1). On main.
+        let mt = (word >> 28) & 0xF
+        guard mt == 0x2 || mt == 0x1 else { return }
         let status = UInt8((word >> 16) & 0xFF)
         let d1 = UInt8((word >> 8) & 0x7F)
         let d2 = UInt8(word & 0x7F)
@@ -172,13 +179,25 @@ final class MIDIManager: ObservableObject {
         }
 
         let message: MIDIMessage
-        switch status & 0xF0 {
-        case 0x90: message = d2 == 0 ? .noteOff(note: d1, channel: channel)
-                                     : .noteOn(note: d1, velocity: d2, channel: channel)
-        case 0x80: message = .noteOff(note: d1, channel: channel)
-        case 0xB0: message = .controlChange(controller: d1, value: d2, channel: channel)
-        case 0xE0: message = .pitchBend(value: UInt16(d1) | (UInt16(d2) << 7), channel: channel)
-        default:   message = .other
+        if mt == 0x1 {                                  // system real-time transport
+            switch status {
+            case 0xFA: message = .transport(.start)
+            case 0xFB: message = .transport(.continue)
+            case 0xFC: message = .transport(.stop)
+            default:   message = .other
+            }
+        } else {
+            switch status & 0xF0 {
+            case 0x90: message = d2 == 0 ? .noteOff(note: d1, channel: channel)
+                                         : .noteOn(note: d1, velocity: d2, channel: channel)
+            case 0x80: message = .noteOff(note: d1, channel: channel)
+            case 0xA0: message = .polyAftertouch(note: d1, pressure: d2, channel: channel)
+            case 0xB0: message = .controlChange(controller: d1, value: d2, channel: channel)
+            case 0xC0: message = .programChange(program: d1, channel: channel)
+            case 0xD0: message = .channelAftertouch(pressure: d1, channel: channel)
+            case 0xE0: message = .pitchBend(value: UInt16(d1) | (UInt16(d2) << 7), channel: channel)
+            default:   message = .other
+            }
         }
         onMessage?(message, source)
     }

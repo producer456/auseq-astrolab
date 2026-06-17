@@ -191,6 +191,17 @@ final class AppModel: ObservableObject {
             playNoteOff(note)
         case let .controlChange(controller, value, _):
             audio.controlChange(controller, value: value, channel: track.midiChannel, to: track.id)
+        case let .polyAftertouch(note, pressure, _):
+            audio.sendMIDI([0xA0 | track.midiChannel, note, pressure], to: track.id)
+        case let .channelAftertouch(pressure, _):
+            audio.sendMIDI([0xD0 | track.midiChannel, pressure], to: track.id)
+        case let .programChange(program, _):
+            audio.sendMIDI([0xC0 | track.midiChannel, program], to: track.id)
+        case let .transport(t):
+            switch t {
+            case .start, .continue: sequencer.play()    // external MIDI clock transport
+            case .stop: sequencer.stop()
+            }
         case .pitchBend, .other:
             break
         }
