@@ -401,6 +401,47 @@ struct PerforatedGrille: View {
 // MARK: - AstroLab signature pieces
 
 /// Macro knob with an LED position ring (blue by default). Vertical drag to turn.
+/// A ring of discrete LEDs (like the AstroLab's real LED rings) lit up to
+/// `progress`, with a bloom on the lit ones. `sweepDeg`/`startDeg` set the arc.
+struct SegmentedLEDRing: View {
+    var progress: Double
+    var color: Color
+    var diameter: CGFloat
+    var dotRadius: CGFloat
+    var segments: Int = 19
+    var sweepDeg: Double = 270
+    var startDeg: Double = 135    // 0=3 o'clock, +CW; 135 = lower-left
+    var bipolar: Bool = false
+
+    var body: some View {
+        Canvas { ctx, size in
+            let c = CGPoint(x: size.width / 2, y: size.height / 2)
+            let r = diameter / 2
+            let p = max(0, min(1, progress))
+            for i in 0..<segments {
+                let t = segments > 1 ? Double(i) / Double(segments - 1) : 0
+                let lit: Bool = bipolar
+                    ? (p >= 0.5 ? (t >= 0.5 - 1e-6 && t <= p + 1e-6) : (t <= 0.5 + 1e-6 && t >= p - 1e-6))
+                    : (t <= p + 1e-6)
+                let a = (startDeg + sweepDeg * t) * .pi / 180
+                let pt = CGPoint(x: c.x + r * cos(a), y: c.y + r * sin(a))
+                if lit {   // bloom
+                    let b = dotRadius * 2.4
+                    ctx.fill(Path(ellipseIn: CGRect(x: pt.x - b, y: pt.y - b, width: b * 2, height: b * 2)),
+                             with: .color(color.opacity(0.30)))
+                }
+                ctx.fill(Path(ellipseIn: CGRect(x: pt.x - dotRadius, y: pt.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2)),
+                         with: .color(lit ? color : color.opacity(0.12)))
+                if lit {   // bright core
+                    let h = dotRadius * 0.5
+                    ctx.fill(Path(ellipseIn: CGRect(x: pt.x - h, y: pt.y - h, width: h * 2, height: h * 2)),
+                             with: .color(.white.opacity(0.55)))
+                }
+            }
+        }
+    }
+}
+
 struct LEDRingKnob: View {
     var value: Double
     var range: ClosedRange<Double> = 0...1
@@ -430,38 +471,41 @@ struct LEDRingKnob: View {
     }
 
     var body: some View {
+        let cap = size - 13
         ZStack {
-            // Recessed channel — inner shadow up top, light at the bottom (inset look).
-            Circle().stroke(LinearGradient(colors: [.black.opacity(0.13), .white.opacity(0.55)],
-                                           startPoint: .top, endPoint: .bottom), lineWidth: 3.5)
+            // Recessed channel groove the LEDs sit in
+            Circle().stroke(LinearGradient(colors: [.black.opacity(0.22), .white.opacity(0.55)],
+                                           startPoint: .top, endPoint: .bottom), lineWidth: 4)
                 .frame(width: size, height: size)
             if bipolar {
-                Capsule().fill(Color.black.opacity(0.18)).frame(width: 1.5, height: 5)
+                Capsule().fill(Color.black.opacity(0.22)).frame(width: 1.5, height: 5)
                     .offset(y: -size / 2)
             }
-            // Lit mint LED band — soft glow on the white
-            Circle().trim(from: litArc.0, to: litArc.1)
-                .stroke(ring, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
-                .rotationEffect(.degrees(135))
-                .frame(width: size, height: size)
-                .shadow(color: ring.opacity(0.75), radius: 3)
-            // Brushed/spun aluminium cap (domed)
+            // Discrete LED ring
+            SegmentedLEDRing(progress: shown, color: ring, diameter: size,
+                             dotRadius: max(1.3, size * 0.028), segments: 19,
+                             sweepDeg: 270, startDeg: 135, bipolar: bipolar)
+                .frame(width: size + 14, height: size + 14)
+            // Brushed/spun aluminium cap (domed) — soft ambient shadow seats it in the plate
+            Circle().fill(Color.black.opacity(0.18)).frame(width: cap + 2, height: cap + 2).blur(radius: 2).offset(y: 1.5)
             Circle()
                 .fill(AngularGradient(
-                    colors: [Color(white: 0.96), Color(white: 0.74), Color(white: 0.92),
-                             Color(white: 0.70), Color(white: 0.94), Color(white: 0.74), Color(white: 0.96)],
+                    colors: [Color(white: 0.97), Color(white: 0.72), Color(white: 0.93),
+                             Color(white: 0.66), Color(white: 0.95), Color(white: 0.72), Color(white: 0.97)],
                     center: .center))
-                .overlay(Circle().fill(RadialGradient(colors: [.white.opacity(0.55), .clear],
-                                                      center: .center, startRadius: 1, endRadius: size * 0.42)))
-                .overlay(Circle().stroke(.black.opacity(0.16), lineWidth: 0.6))
-                .frame(width: size - 13, height: size - 13)
-                .shadow(color: .black.opacity(0.20), radius: 2, y: 1)
-            Capsule().fill(Theme.etched.opacity(0.65))
-                .frame(width: 2, height: size * 0.17)
-                .offset(y: -size * 0.16)
+                .overlay(Circle().fill(RadialGradient(colors: [.white.opacity(0.7), .clear],
+                                                      center: .init(x: 0.36, y: 0.30), startRadius: 1, endRadius: size * 0.46)))
+                .overlay(Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.6), .black.opacity(0.28)],
+                                                              startPoint: .top, endPoint: .bottom), lineWidth: 1))  // bevel
+                .frame(width: cap, height: cap)
+            // Engraved indicator notch
+            Capsule().fill(Color.black.opacity(0.6))
+                .frame(width: 2.2, height: size * 0.18)
+                .offset(y: -size * 0.15)
                 .rotationEffect(.degrees(-135 + 270 * shown))
+                .shadow(color: .white.opacity(0.45), radius: 0.3, y: 0.7)   // engraved light edge
         }
-        .frame(width: size + 12, height: size + 12)
+        .frame(width: size + 14, height: size + 14)
         .contentShape(Circle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -491,34 +535,42 @@ struct NavWheel: View {
     var ringColor: Color = Theme.ring
 
     var body: some View {
-        let ringW = max(3, size * 0.04)
-        let ringD = size * 0.91
-        let p = max(0, min(1, progress))
+        let screenD = size * 0.74
         ZStack {
-            Circle().fill(Theme.card)
-                .overlay(Circle().stroke(Theme.gold, lineWidth: 1))
-                .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
-            // Dim LED track (the full ring of unlit LEDs)
-            Circle().stroke(ringColor.opacity(0.16), lineWidth: ringW)
-                .frame(width: ringD, height: ringD)
-            // Lit arc from 12 o'clock, length = level
-            Circle().trim(from: 0, to: max(0.0001, p))
-                .stroke(lit || p > 0 ? ringColor : Theme.etchedSoft.opacity(0.4),
-                        style: StrokeStyle(lineWidth: ringW, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .frame(width: ringD, height: ringD)
-                .shadow(color: ringColor.opacity(0.7), radius: size * 0.04)
-            Circle().fill(Color(red: 0.07, green: 0.085, blue: 0.11))
-                .frame(width: size * 0.76, height: size * 0.76)
-                .overlay(Circle().stroke(.white.opacity(0.06), lineWidth: 1))
+            // Brushed-metal bezel ring (the physical rotary)
+            Circle()
+                .fill(AngularGradient(colors: [Color(white: 0.92), Color(white: 0.66), Color(white: 0.86),
+                                               Color(white: 0.62), Color(white: 0.88), Color(white: 0.66), Color(white: 0.92)],
+                                      center: .center))
+                .overlay(Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.7), .black.opacity(0.3)],
+                                                              startPoint: .top, endPoint: .bottom), lineWidth: 1.2))
+                .shadow(color: .black.opacity(0.35), radius: size * 0.05, y: 2)
+            // Discrete LED ring around the bezel
+            SegmentedLEDRing(progress: progress, color: ringColor, diameter: size * 0.93,
+                             dotRadius: max(1.4, size * 0.019), segments: 32,
+                             sweepDeg: 344, startDeg: 98)
+                .frame(width: size, height: size)
+            // Recessed round screen (dark glass)
+            Circle().fill(Color(red: 0.055, green: 0.07, blue: 0.095))
+                .frame(width: screenD, height: screenD)
+                .overlay(   // vignette — concave glass darkening toward the rim
+                    Circle().fill(RadialGradient(colors: [.clear, .black.opacity(0.55)],
+                                                 center: .center, startRadius: screenD * 0.18, endRadius: screenD * 0.52)))
+                .overlay(Circle().stroke(.black.opacity(0.6), lineWidth: 1.5))   // screen lip
+                .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+            // Glass gloss highlight near the top
+            Ellipse().fill(LinearGradient(colors: [.white.opacity(0.22), .clear], startPoint: .top, endPoint: .bottom))
+                .frame(width: screenD * 0.62, height: screenD * 0.34)
+                .offset(y: -screenD * 0.22)
+                .blur(radius: 1)
             VStack(spacing: size * 0.02) {
-                Image(systemName: glyph).font(.system(size: size * 0.17, weight: .semibold))
+                Image(systemName: glyph).font(.system(size: size * 0.16, weight: .semibold))
                     .foregroundStyle(Theme.orange)
                 Text(title).font(Theme.mono(size * 0.12, .bold)).foregroundStyle(.white).lineLimit(1)
                     .minimumScaleFactor(0.6)
-                Text(subtitle).font(Theme.mono(max(7, size * 0.072), .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                Text(subtitle).font(Theme.mono(max(7, size * 0.07), .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
             }
-            .frame(width: size * 0.70)
+            .frame(width: screenD * 0.92)
         }
         .frame(width: size, height: size)
     }
