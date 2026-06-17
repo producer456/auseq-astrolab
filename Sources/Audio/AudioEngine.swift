@@ -14,6 +14,7 @@ final class AudioEngine: ObservableObject {
         let mixer: AVAudioMixerNode
         let scheduleMIDI: AUScheduleMIDIEventBlock?
         let name: String
+        let desc: AudioComponentDescription   // kept so a song can re-instantiate this plugin
     }
 
     private var hosts: [UUID: TrackAudio] = [:]
@@ -127,13 +128,40 @@ final class AudioEngine: ObservableObject {
                     self.lastError = "Load \(name): no audio unit"
                     return
                 }
-                self.attach(unit, name: name, to: trackID)
+                self.attach(unit, name: name, desc: desc, to: trackID)
                 completion(name)
             }
         }
     }
 
-    private func attach(_ unit: AVAudioUnit, name: String, to trackID: UUID) {
+    /// Re-instantiate an instrument from a saved AUv3 identity + restore its full
+    /// state (the patch). Used when loading a song.
+    func loadInstrument(description desc: AudioComponentDescription,
+                        name: String,
+                        fullState: [String: Any]?,
+                        for trackID: UUID,
+                        completion: @escaping (String) -> Void) {
+        loadingTrackIDs.insert(trackID)
+        AVAudioUnit.instantiate(with: desc, options: [.loadOutOfProcess]) { [weak self] unit, error in
+            Task { @MainActor in
+                guard let self else { return }
+                self.loadingTrackIDs.remove(trackID)
+                if let error {
+                    self.lastError = "Load \(name): \(error.localizedDescription)"
+                    return
+                }
+                guard let unit else {
+                    self.lastError = "Load \(name): no audio unit"
+                    return
+                }
+                if let fullState { unit.auAudioUnit.fullState = fullState }
+                self.attach(unit, name: name, desc: desc, to: trackID)
+                completion(name)
+            }
+        }
+    }
+
+    private func attach(_ unit: AVAudioUnit, name: String, desc: AudioComponentDescription, to trackID: UUID) {
         diag("audio", "attach instrument '\(name)' (engine was \(engine.isRunning ? "running" : "stopped"))")
         let wasRunning = engine.isRunning
         if wasRunning { engine.stop(); clickNeedsRestart = true }
@@ -153,7 +181,8 @@ final class AudioEngine: ObservableObject {
             unit: unit,
             mixer: mixer,
             scheduleMIDI: unit.auAudioUnit.scheduleMIDIEventBlock,
-            name: name
+            name: name,
+            desc: desc
         )
         start()
     }
@@ -179,6 +208,16 @@ final class AudioEngine: ObservableObject {
     /// The hosted AUAudioUnit for a track (used by the parameter/preset UI later).
     func auAudioUnit(for trackID: UUID) -> AUAudioUnit? {
         hosts[trackID]?.unit.auAudioUnit
+    }
+
+    /// AUv3 identity of a track's loaded instrument (for saving a song).
+    func componentDescription(for trackID: UUID) -> AudioComponentDescription? {
+        hosts[trackID]?.desc
+    }
+
+    /// The loaded instrument's full state / patch (for saving a song).
+    func fullState(for trackID: UUID) -> [String: Any]? {
+        hosts[trackID]?.unit.auAudioUnit.fullState
     }
 
     // MARK: - Mixer control

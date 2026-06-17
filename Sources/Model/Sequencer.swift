@@ -251,6 +251,18 @@ final class Sequencer: ObservableObject {
         clips.removeAll(); quantizeDelta.removeAll(); hasContent = false
     }
 
+    // MARK: - Persistence support
+
+    /// Raw recorded events for a track (beats) — used when saving a song.
+    func clipNotes(for trackID: UUID) -> [NoteEvent] { clips[trackID] ?? [] }
+
+    /// Replace a track's clip wholesale (used when loading a song).
+    func loadClip(_ events: [NoteEvent], for trackID: UUID) {
+        clips[trackID] = events.sorted { $0.time < $1.time }
+        refreshContent()
+        objectWillChange.send()
+    }
+
     // MARK: - Quantize already-recorded
 
     func quantize(_ trackID: UUID) {

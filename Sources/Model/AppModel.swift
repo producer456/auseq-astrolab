@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import AVFoundation
 import AudioToolbox
 
@@ -151,6 +152,129 @@ final class AppModel: ObservableObject {
         if newState { select(track) }
         objectWillChange.send()
         diag("app", "arm \(track.name) = \(newState)")
+    }
+
+    // MARK: - Song persistence (v2.1)
+
+    private var songURL: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("auseq-song.json")
+    }
+
+    var hasSavedSong: Bool { FileManager.default.fileExists(atPath: songURL.path) }
+
+    /// Snapshot the whole session to disk: settings, tracks (instrument identity +
+    /// patch + mixer), and recorded notes.
+    func saveSong() {
+        var trackDatas: [SongDocument.TrackData] = []
+        for t in tracks {
+            let (r, g, b, _) = Self.rgba(of: t.color)
+            var td = SongDocument.TrackData(
+                name: t.name, red: r, green: g, blue: b,
+                volume: t.volume, pan: t.pan, muted: t.muted, midiChannel: t.midiChannel,
+                instrumentName: t.instrumentName, hasInstrument: t.hasInstrument,
+                componentType: nil, componentSubType: nil, componentManufacturer: nil,
+                fullState: nil,
+                notes: sequencer.clipNotes(for: t.id).map {
+                    SongDocument.NoteData(time: $0.time, note: $0.note, velocity: $0.velocity, isOn: $0.isOn)
+                })
+            if let desc = audio.componentDescription(for: t.id) {
+                td.componentType = desc.componentType
+                td.componentSubType = desc.componentSubType
+                td.componentManufacturer = desc.componentManufacturer
+                if let state = audio.fullState(for: t.id) {
+                    td.fullState = try? PropertyListSerialization.data(fromPropertyList: state, format: .binary, options: 0)
+                }
+            }
+            trackDatas.append(td)
+        }
+        let doc = SongDocument(
+            bpm: sequencer.bpm, loopBars: sequencer.loopBars,
+            quantizeOn: sequencer.quantizeOn, quantizeGrid: sequencer.quantizeGrid.rawValue,
+            loopEnabled: sequencer.loopEnabled, countInEnabled: sequencer.countInEnabled,
+            loopStartBeat: sequencer.loopStartBeat, loopEndBeat: sequencer.loopEndBeat,
+            selectedTrackIndex: tracks.firstIndex { $0.id == selectedTrackID },
+            tracks: trackDatas)
+        do {
+            let data = try JSONEncoder().encode(doc)
+            try data.write(to: songURL, options: .atomic)
+            diag("song", "saved \(trackDatas.count) tracks")
+        } catch {
+            diag("song", "save FAILED: \(error.localizedDescription)")
+        }
+        objectWillChange.send()
+    }
+
+    /// Rebuild the session from disk. Tracks get fresh IDs; clips are restored
+    /// immediately, instruments re-instantiate (and reapply their patch) async.
+    func loadSong() {
+        guard let data = try? Data(contentsOf: songURL),
+              let doc = try? JSONDecoder().decode(SongDocument.self, from: data) else {
+            diag("song", "load: no saved song"); return
+        }
+        sequencer.stop()
+        for t in tracks { audio.removeTrack(t.id) }
+        sequencer.clear()
+        tracks.removeAll()
+
+        sequencer.bpm = doc.bpm
+        sequencer.loopBars = doc.loopBars
+        sequencer.quantizeOn = doc.quantizeOn
+        sequencer.quantizeGrid = QuantizeGrid(rawValue: doc.quantizeGrid) ?? .d16
+        sequencer.loopEnabled = doc.loopEnabled
+        sequencer.countInEnabled = doc.countInEnabled
+        sequencer.loopStartBeat = doc.loopStartBeat
+        sequencer.loopEndBeat = doc.loopEndBeat
+
+        for td in doc.tracks {
+            let color = Color(.sRGB, red: Double(td.red), green: Double(td.green), blue: Double(td.blue))
+            let track = Track(name: td.name, color: color)
+            track.volume = td.volume
+            track.pan = td.pan
+            track.muted = td.muted
+            track.midiChannel = td.midiChannel
+            track.instrumentName = td.instrumentName
+            track.armed = false
+            tracks.append(track)
+
+            sequencer.loadClip(td.notes.map {
+                Sequencer.NoteEvent(time: $0.time, note: $0.note, velocity: $0.velocity, isOn: $0.isOn)
+            }, for: track.id)
+
+            if td.hasInstrument,
+               let type = td.componentType, let sub = td.componentSubType, let mfr = td.componentManufacturer {
+                var desc = AudioComponentDescription()
+                desc.componentType = type
+                desc.componentSubType = sub
+                desc.componentManufacturer = mfr
+                let state = td.fullState.flatMap {
+                    (try? PropertyListSerialization.propertyList(from: $0, options: [], format: nil)) as? [String: Any]
+                }
+                audio.loadInstrument(description: desc, name: td.instrumentName, fullState: state, for: track.id) { [weak self] _ in
+                    track.hasInstrument = true
+                    self?.audio.setVolume(track.muted ? 0 : track.volume, for: track.id)
+                    self?.audio.setPan(track.pan, for: track.id)
+                    self?.objectWillChange.send()
+                }
+            }
+        }
+
+        if tracks.isEmpty {
+            addTrack()
+        } else {
+            let idx = min(max(0, doc.selectedTrackIndex ?? 0), tracks.count - 1)
+            selectedTrackID = tracks[idx].id
+            setArmed(tracks[idx])
+        }
+        objectWillChange.send()
+        diag("song", "loaded \(doc.tracks.count) tracks")
+    }
+
+    /// Resolve a SwiftUI Color to sRGB components for round-tripping to disk.
+    static func rgba(of color: Color) -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return (r, g, b, a)
     }
 
     // MARK: - Live input routing (keyboard + MIDI in)

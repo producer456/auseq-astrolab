@@ -153,6 +153,14 @@ struct ContentView: View {
                     .foregroundStyle(Theme.etched)
                 if !isPhone { Text(midiSummary).etchedLabel(9, soft: true, weight: .medium) }
             }
+            Menu {
+                Button { model.saveSong() } label: { Label("Save Song", systemImage: "square.and.arrow.down") }
+                Button { model.loadSong() } label: { Label("Open Last Song", systemImage: "tray.and.arrow.up") }
+                    .disabled(!model.hasSavedSong)
+            } label: {
+                Image(systemName: "folder.fill")
+                    .font(.title3).foregroundStyle(Theme.orange)
+            }
             Button { showingConfig = true } label: {
                 Image(systemName: "gearshape.fill")
                     .font(.title3).foregroundStyle(Theme.orange)
