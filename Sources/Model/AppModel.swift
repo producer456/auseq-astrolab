@@ -163,9 +163,8 @@ final class AppModel: ObservableObject {
 
     var hasSavedSong: Bool { FileManager.default.fileExists(atPath: songURL.path) }
 
-    /// Snapshot the whole session to disk: settings, tracks (instrument identity +
-    /// patch + mixer), and recorded notes.
-    func saveSong() {
+    /// Build a serializable snapshot of the current session.
+    func makeDocument() -> SongDocument {
         var trackDatas: [SongDocument.TrackData] = []
         for t in tracks {
             let (r, g, b, _) = Self.rgba(of: t.color)
@@ -188,21 +187,57 @@ final class AppModel: ObservableObject {
             }
             trackDatas.append(td)
         }
-        let doc = SongDocument(
+        return SongDocument(
             bpm: sequencer.bpm, loopBars: sequencer.loopBars,
             quantizeOn: sequencer.quantizeOn, quantizeGrid: sequencer.quantizeGrid.rawValue,
             loopEnabled: sequencer.loopEnabled, countInEnabled: sequencer.countInEnabled,
             loopStartBeat: sequencer.loopStartBeat, loopEndBeat: sequencer.loopEndBeat,
             selectedTrackIndex: tracks.firstIndex { $0.id == selectedTrackID },
             tracks: trackDatas)
+    }
+
+    /// Snapshot the whole session to disk: settings, tracks (instrument identity +
+    /// patch + mixer), and recorded notes.
+    func saveSong() {
+        let doc = makeDocument()
         do {
             let data = try JSONEncoder().encode(doc)
             try data.write(to: songURL, options: .atomic)
-            diag("song", "saved \(trackDatas.count) tracks")
+            diag("song", "saved \(doc.tracks.count) tracks")
         } catch {
             diag("song", "save FAILED: \(error.localizedDescription)")
         }
         objectWillChange.send()
+    }
+
+    /// Self-test (no plugin/ears needed): encode the live session to JSON, decode
+    /// it back, and confirm the structural data survives the round-trip. Verifies
+    /// the serialization layer (notes, settings, mixer, colors) on-device.
+    func roundTripReport() -> String {
+        let doc = makeDocument()
+        let totalNotes = doc.tracks.reduce(0) { $0 + $1.notes.count }
+        do {
+            let data = try JSONEncoder().encode(doc)
+            let back = try JSONDecoder().decode(SongDocument.self, from: data)
+            let backNotes = back.tracks.reduce(0) { $0 + $1.notes.count }
+            var checks: [(String, Bool)] = [
+                ("tracks \(doc.tracks.count) → \(back.tracks.count)", doc.tracks.count == back.tracks.count),
+                ("notes \(totalNotes) → \(backNotes)", totalNotes == backNotes),
+                ("bpm \(Int(doc.bpm))", doc.bpm == back.bpm),
+                ("bars \(doc.loopBars)", doc.loopBars == back.loopBars),
+                ("grid \(doc.quantizeGrid)", doc.quantizeGrid == back.quantizeGrid),
+                ("loop region", doc.loopStartBeat == back.loopStartBeat && doc.loopEndBeat == back.loopEndBeat),
+            ]
+            if let f = doc.tracks.first, let bf = back.tracks.first {
+                checks.append(("track-1 color", f.red == bf.red && f.green == bf.green && f.blue == bf.blue))
+                checks.append(("track-1 instrument id", f.componentSubType == bf.componentSubType))
+            }
+            let pass = checks.allSatisfy { $0.1 }
+            let body = checks.map { "  \($0.1 ? "✓" : "✗") \($0.0)" }.joined(separator: "\n")
+            return "\(pass ? "PASS" : "FAIL") — save/load round-trip (\(data.count) bytes)\n\(body)"
+        } catch {
+            return "FAIL — \(error.localizedDescription)"
+        }
     }
 
     /// Rebuild the session from disk. Tracks get fresh IDs; clips are restored

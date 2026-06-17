@@ -27,6 +27,14 @@ struct ConfigurationView: View {
                     }
                 }
 
+                Section("Verification") {
+                    NavigationLink {
+                        VerifyV21View(model: model)
+                    } label: {
+                        Label("Verify v2.1 (guided)", systemImage: "checkmark.seal")
+                    }
+                }
+
                 Section("Diagnostics") {
                     NavigationLink {
                         DiagnosticsView()
