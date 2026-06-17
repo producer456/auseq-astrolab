@@ -6,6 +6,7 @@ import AVFoundation
 struct SoundBrowserWheel: View {
     @ObservedObject var model: AppModel
     var size: CGFloat = 88
+    @State private var dragStart: Int?
 
     private var instruments: [AVAudioUnitComponent] { model.browser.instruments }
 
@@ -15,32 +16,28 @@ struct SoundBrowserWheel: View {
         let browsed = count > 0 ? instruments[bidx].name : nil
         let loaded = model.selectedTrack?.instrumentName
         let hasInst = model.selectedTrack?.hasInstrument ?? false
-        // Show whatever the wheel is browsing (on-screen or via the KeyLab jog).
+        // Browse + load happen ON the screen — no pop-out. Drag (or the KeyLab jog)
+        // browses; tap (or jog press) loads the shown sound onto the selected track.
         let title = browsed ?? (hasInst ? (loaded ?? "—") : "LOAD")
         let pending = browsed != nil && (!hasInst || browsed != loaded)
         let sub = count == 0 ? "no sounds"
-                             : (pending ? "tap / press knob to load" : "tap to change · turn knob")
+                             : (pending ? "tap / press to load" : "turn to browse")
+        // LED ring = position in the sound list while browsing.
+        let prog = count > 1 ? Double(bidx) / Double(count - 1) : (count == 1 ? 1 : 0)
 
-        // The wheel IS the plugin loader for the selected track — pick a sound and
-        // it loads onto whatever track is selected (no need to load one first).
-        Menu {
-            if instruments.isEmpty {
-                Text("No AUv3 instruments found")
-            } else if let track = model.selectedTrack {
-                Section("Load onto \(track.name)") {
-                    ForEach(Array(instruments.enumerated()), id: \.offset) { _, inst in
-                        Button {
-                            model.assignInstrument(inst, to: track)
-                        } label: {
-                            if hasInst && inst.name == loaded { Label(inst.name, systemImage: "checkmark") }
-                            else { Text(inst.name) }
-                        }
+        NavWheel(title: title, subtitle: sub, glyph: "waveform", lit: hasInst, size: size, progress: prog)
+            .contentShape(Circle())
+            .gesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { v in
+                        guard count > 0 else { return }
+                        if dragStart == nil { dragStart = model.browseIndex }
+                        let steps = Int(-v.translation.height / 20)
+                        model.browseIndex = (((dragStart ?? 0) + steps) % count + count) % count
                     }
-                }
-            }
-        } label: {
-            NavWheel(title: title, subtitle: sub, glyph: "waveform", lit: hasInst, size: size)
-        }
+                    .onEnded { _ in dragStart = nil }
+            )
+            .onTapGesture { model.browseCommit() }
     }
 }
 
@@ -240,9 +237,9 @@ struct ContentView: View {
             }
             // The "screen" — big nav wheel; on iPad it's flanked by 8 inlaid param knobs.
             if isPhone {
-                SoundBrowserWheel(model: model, size: 92)
+                SoundBrowserWheel(model: model, size: 104).frame(height: 96)
             } else {
-                WheelKnobDeck(model: model, tone: woodTone, wheelSize: 130)
+                WheelKnobDeck(model: model, tone: woodTone, wheelSize: 168, reservedHeight: 120)
             }
             if !isPhone {
                 Text(midiSummary).font(Theme.mono(8.5, .medium)).tracking(1)

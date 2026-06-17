@@ -9,17 +9,22 @@ struct WheelKnobDeck: View {
     var tone: WoodTone
     var wheelSize: CGFloat
     var knobSize: CGFloat = 54   // match the original params-section knob size
+    /// Vertical space the wheel row reserves — the wheel can be larger than this
+    /// and overflow into the (empty) centre of the strip/transport above & below,
+    /// so a bigger screen doesn't grow the wood panel.
+    var reservedHeight: CGFloat = 120
 
     private var spacing: CGFloat { 28 }
 
     var body: some View {
         if let au = model.selectedAU {
-            BoundKnobDeck(au: au, model: model, tone: tone, wheelSize: wheelSize, knobSize: knobSize, spacing: spacing)
+            BoundKnobDeck(au: au, model: model, tone: tone, wheelSize: wheelSize,
+                          knobSize: knobSize, spacing: spacing, reservedHeight: reservedHeight)
                 .id(model.selectedTrackID)   // rebuild the param VM when the track changes
         } else {
             HStack(alignment: .center, spacing: spacing) {
                 ForEach(0..<4, id: \.self) { _ in emptyWell }
-                SoundBrowserWheel(model: model, size: wheelSize)
+                SoundBrowserWheel(model: model, size: wheelSize).frame(height: reservedHeight)
                 ForEach(4..<8, id: \.self) { _ in emptyWell }
             }
         }
@@ -34,7 +39,7 @@ struct WheelKnobDeck: View {
 }
 
 /// What a knob is currently adjusting — shown on the center screen while turning.
-struct KnobEdit: Equatable { var label: String; var value: String }
+struct KnobEdit: Equatable { var label: String; var value: String; var progress: Double }
 
 /// Owns a parameter VM for the current AU and lays out left-4 / wheel / right-4.
 private struct BoundKnobDeck: View {
@@ -44,12 +49,14 @@ private struct BoundKnobDeck: View {
     let wheelSize: CGFloat
     let knobSize: CGFloat
     let spacing: CGFloat
+    let reservedHeight: CGFloat
 
     @State private var editing: KnobEdit?
 
-    init(au: AUAudioUnit, model: AppModel, tone: WoodTone, wheelSize: CGFloat, knobSize: CGFloat, spacing: CGFloat) {
+    init(au: AUAudioUnit, model: AppModel, tone: WoodTone, wheelSize: CGFloat, knobSize: CGFloat, spacing: CGFloat, reservedHeight: CGFloat) {
         _vm = StateObject(wrappedValue: ParameterListVM(au: au))
-        self.model = model; self.tone = tone; self.wheelSize = wheelSize; self.knobSize = knobSize; self.spacing = spacing
+        self.model = model; self.tone = tone; self.wheelSize = wheelSize; self.knobSize = knobSize
+        self.spacing = spacing; self.reservedHeight = reservedHeight
     }
 
     var body: some View {
@@ -68,11 +75,12 @@ private struct BoundKnobDeck: View {
             SoundBrowserWheel(model: model, size: wheelSize)
             if let editing {
                 NavWheel(title: editing.label, subtitle: editing.value, glyph: "dial.medium.fill",
-                         lit: true, size: wheelSize)
+                         lit: true, size: wheelSize, progress: editing.progress)
                     .allowsHitTesting(false)
                     .transition(.opacity)
             }
         }
+        .frame(height: reservedHeight)   // bigger wheel overflows without growing the panel
     }
 
     @ViewBuilder private func knob(_ i: Int) -> some View {
@@ -101,7 +109,7 @@ private struct InlaidKnob: View {
         let span = Double(param.maxValue - param.minValue)
         return span > 0 ? Double(vm.value(param) - param.minValue) / span : 0
     }
-    private var current: KnobEdit { KnobEdit(label: param.displayName, value: vm.formattedValue(param)) }
+    private var current: KnobEdit { KnobEdit(label: param.displayName, value: vm.formattedValue(param), progress: norm) }
 
     var body: some View {
         VStack(spacing: 3) {

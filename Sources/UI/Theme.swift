@@ -485,18 +485,29 @@ struct NavWheel: View {
     var glyph: String = "waveform"
     var lit: Bool = true
     var size: CGFloat = 92
+    /// LED-ring level (0…1) — like the AstroLab's screen-encoder ring: shows
+    /// browse position while loading sounds, or the param value while turning.
+    var progress: Double = 1
+    var ringColor: Color = Theme.ring
 
     var body: some View {
+        let ringW = max(3, size * 0.04)
+        let ringD = size * 0.91
+        let p = max(0, min(1, progress))
         ZStack {
             Circle().fill(Theme.card)
                 .overlay(Circle().stroke(Theme.gold, lineWidth: 1))
                 .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
-            Circle().trim(from: 0, to: 0.82)
-                .stroke(lit ? Theme.orange : Theme.etchedSoft.opacity(0.4),
-                        style: StrokeStyle(lineWidth: max(3, size * 0.033), lineCap: .round))
-                .rotationEffect(.degrees(126))
-                .frame(width: size * 0.91, height: size * 0.91)
-                .shadow(color: lit ? Theme.orange.opacity(0.6) : .clear, radius: size * 0.035)
+            // Dim LED track (the full ring of unlit LEDs)
+            Circle().stroke(ringColor.opacity(0.16), lineWidth: ringW)
+                .frame(width: ringD, height: ringD)
+            // Lit arc from 12 o'clock, length = level
+            Circle().trim(from: 0, to: max(0.0001, p))
+                .stroke(lit || p > 0 ? ringColor : Theme.etchedSoft.opacity(0.4),
+                        style: StrokeStyle(lineWidth: ringW, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .frame(width: ringD, height: ringD)
+                .shadow(color: ringColor.opacity(0.7), radius: size * 0.04)
             Circle().fill(Color(red: 0.07, green: 0.085, blue: 0.11))
                 .frame(width: size * 0.76, height: size * 0.76)
                 .overlay(Circle().stroke(.white.opacity(0.06), lineWidth: 1))
