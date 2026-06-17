@@ -166,7 +166,7 @@ private struct RulerTimeline: View {
                     Text("\(bar + 1)").font(Theme.mono(9, .semibold)).foregroundStyle(Theme.etchedSoft)
                         .position(x: x + 8, y: h / 2)
                 }
-                let px = CGFloat(seq.positionSeconds / max(0.001, seq.loopLength)) * w
+                let px = CGFloat(seq.positionBeats / max(0.001, seq.totalBeats)) * w
                 Rectangle().fill(Theme.etched).frame(width: 1.5, height: h).position(x: px, y: h / 2)
             }
             .contentShape(Rectangle())
@@ -202,7 +202,7 @@ private struct LaneTimelineView: View {
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
-            let loop = max(0.001, seq.loopLength)
+            let loop = max(0.001, seq.totalBeats)
             let total = CGFloat(totalBeats)
             let rects = seq.noteRects(for: track.id)
             let span = CGFloat(hiPitch - loPitch)
@@ -227,7 +227,7 @@ private struct LaneTimelineView: View {
                     RoundedRectangle(cornerRadius: 1).fill(track.color)
                         .frame(width: nw, height: 3).position(x: x + nw / 2, y: max(2, min(h - 2, y)))
                 }
-                let px = CGFloat(min(loop, max(0, seq.positionSeconds)) / loop) * w
+                let px = CGFloat(min(loop, max(0, seq.positionBeats)) / loop) * w
                 Rectangle().fill(Theme.etched.opacity(0.8)).frame(width: 1.5, height: h).position(x: px, y: h / 2)
             }
             .contentShape(Rectangle())

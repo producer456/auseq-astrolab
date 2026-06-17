@@ -11,7 +11,7 @@ struct ClipView: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let loop = max(0.001, seq.loopLength)
+            let loop = max(0.001, seq.totalBeats)
             let rects = trackID.map { seq.noteRects(for: $0) } ?? []
             let pitches = rects.map { Int($0.note) }
             let lo = (pitches.min() ?? 48) - 1
@@ -43,7 +43,7 @@ struct ClipView: View {
                 }
 
                 // Playhead
-                let px = CGFloat(min(loop, max(0, seq.positionSeconds)) / loop) * w
+                let px = CGFloat(min(loop, max(0, seq.positionBeats)) / loop) * w
                 Rectangle().fill(Theme.etched.opacity(0.8))
                     .frame(width: 1.5, height: h)
                     .position(x: px, y: h / 2)

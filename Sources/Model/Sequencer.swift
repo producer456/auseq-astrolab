@@ -19,13 +19,14 @@ enum QuantizeGrid: String, CaseIterable, Identifiable {
     }
 }
 
-/// M6 transport + record/playback. Play runs a looping clock; with Record armed,
-/// notes you play (keys or KeyLab) are captured onto the selected track's clip
-/// and replayed each loop. Both the KeyLab transport and the on-screen bar drive it.
+/// Transport + record/playback engine. **Beat-native** (v2.1): all musical time
+/// is in beats, so it's tempo-independent and persistence-ready; the wall clock
+/// only samples elapsed time and re-bases on tempo changes so playback never
+/// drifts. Seconds are exposed at the boundary for any callers that want them.
 @MainActor
 final class Sequencer: ObservableObject {
     struct NoteEvent {
-        let time: Double      // seconds from loop start
+        let time: Double      // BEATS from song start
         let note: UInt8
         let velocity: UInt8
         let isOn: Bool
@@ -34,56 +35,79 @@ final class Sequencer: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var isRecordArmed = false
     @Published private(set) var isCountingIn = false
-    @Published private(set) var positionSeconds = 0.0
+    @Published private(set) var positionBeats = 0.0
     @Published private(set) var hasContent = false
 
     @Published var countInEnabled = true
-    @Published var quantizeOn = false           // auto-quantize while recording
+    @Published var quantizeOn = false
     @Published var quantizeGrid: QuantizeGrid = .d16
-    @Published var loopEnabled = true   // off = linear: play to song end, then stop
+    @Published var loopEnabled = true
 
-    // User-placed loop region (in beats). end<=start ⇒ no region ⇒ loop the whole song.
+    // Tempo / grid
+    @Published var bpm = 120.0 {
+        didSet {
+            bpm = min(300, max(20, bpm))
+            if isPlaying { anchorBeat = positionBeats; anchorDate = Date() }   // re-base so tempo change doesn't jump
+        }
+    }
+    @Published var loopBars = 4
+    @Published var metronomeOn = false { didSet { diag("seq", "metronome \(metronomeOn ? "ON" : "off")") } }
+    let beatsPerBar = 4
+
+    // Derived units
+    var secondsPerBeat: Double { 60.0 / bpm }
+    var totalBeats: Double { Double(loopBars * beatsPerBar) }
+    var positionSeconds: Double { positionBeats * secondsPerBeat }   // boundary convenience
+    var loopLength: Double { totalBeats * secondsPerBeat }
+
+    // User-placed loop region (beats). end<=start ⇒ no region ⇒ loop whole song.
     @Published var loopStartBeat = 0.0
     @Published var loopEndBeat = 0.0
     var hasLoopRegion: Bool { loopEndBeat > loopStartBeat + 1e-6 }
-    var loopStartSec: Double { loopStartBeat * secondsPerBeat }
-    var loopEndSec: Double { hasLoopRegion ? loopEndBeat * secondsPerBeat : loopLength }
 
-    /// Snap a beat position to the current grid (reused as the edit/loop snap).
+    // Selection (beats)
+    @Published var selStartBeat = 0.0
+    @Published var selEndBeat = 0.0
+    @Published var selTrackID: UUID?
+    @Published var selectionAllTracks = false
+    var hasSelection: Bool { selEndBeat > selStartBeat + 1e-6 }
+
+    // Callbacks (set by AppModel)
+    var onEvent: ((NoteEvent, UUID) -> Void)?
+    var onBeat: ((Bool) -> Void)?
+    var recordTrackID: (() -> UUID?)?
+
+    private var clips: [UUID: [NoteEvent]] = [:]
+    private var timer: Timer?
+    private var anchorDate: Date?
+    private var anchorBeat = 0.0
+    private var lastPos = 0.0          // beats
+    private var lastBeat = -1
+    private var active: [(note: UInt8, track: UUID)] = []
+    private var quantizeDelta: [UInt8: Double] = [:]   // per-note start shift (beats) while recording quantized
+
+    private struct ClipNote { let note: UInt8; let vel: UInt8; let offset: Double; let dur: Double }   // beats
+    private var clipboard: [UUID: [ClipNote]] = [:]
+    var hasClipboard: Bool { !clipboard.isEmpty }
+
+    // MARK: - Snap / loop region / selection
+
     func snapBeat(_ beat: Double) -> Double {
         let g = quantizeGrid.beats
         return (beat / g).rounded() * g
     }
 
     func setLoopRegion(startBeat: Double, endBeat: Double) {
-        let total = Double(loopBars * beatsPerBar)
-        let a = min(max(0, snapBeat(min(startBeat, endBeat))), total)
-        let b = min(max(0, snapBeat(max(startBeat, endBeat))), total)
-        loopStartBeat = a
-        loopEndBeat = b
+        loopStartBeat = min(max(0, snapBeat(min(startBeat, endBeat))), totalBeats)
+        loopEndBeat = min(max(0, snapBeat(max(startBeat, endBeat))), totalBeats)
     }
-
     func clearLoopRegion() { loopStartBeat = 0; loopEndBeat = 0 }
 
-    // MARK: - Section selection + clipboard editing
-
-    @Published var selStartBeat = 0.0
-    @Published var selEndBeat = 0.0
-    @Published var selTrackID: UUID?         // the lane the selection was drawn on
-    @Published var selectionAllTracks = false
-    var hasSelection: Bool { selEndBeat > selStartBeat + 1e-6 }
-
-    private struct ClipNote { let note: UInt8; let vel: UInt8; let offset: Double; let dur: Double }
-    private var clipboard: [UUID: [ClipNote]] = [:]
-    var hasClipboard: Bool { !clipboard.isEmpty }
-
     func setSelection(startBeat: Double, endBeat: Double, trackID: UUID?) {
-        let total = Double(loopBars * beatsPerBar)
-        selStartBeat = min(max(0, snapBeat(min(startBeat, endBeat))), total)
-        selEndBeat = min(max(0, snapBeat(max(startBeat, endBeat))), total)
+        selStartBeat = min(max(0, snapBeat(min(startBeat, endBeat))), totalBeats)
+        selEndBeat = min(max(0, snapBeat(max(startBeat, endBeat))), totalBeats)
         selTrackID = trackID
     }
-
     func clearSelection() { selStartBeat = 0; selEndBeat = 0; selTrackID = nil }
 
     private func targetIDs(_ allTrackIDs: [UUID]) -> [UUID] {
@@ -92,9 +116,11 @@ final class Sequencer: ObservableObject {
         return []
     }
 
+    // MARK: - Clipboard editing (all beats)
+
     func copySelection(allTrackIDs: [UUID]) {
         guard hasSelection else { return }
-        let a = selStartBeat * secondsPerBeat, b = selEndBeat * secondsPerBeat
+        let a = selStartBeat, b = selEndBeat
         clipboard.removeAll()
         for tid in targetIDs(allTrackIDs) {
             let notes = noteRects(for: tid).filter { $0.start >= a && $0.start < b }
@@ -107,60 +133,45 @@ final class Sequencer: ObservableObject {
 
     func eraseSelection(allTrackIDs: [UUID]) {
         guard hasSelection else { return }
-        let a = selStartBeat * secondsPerBeat, b = selEndBeat * secondsPerBeat
-        for tid in targetIDs(allTrackIDs) { removeNotes(tid, from: a, to: b) }
-        refreshContent()
-        diag("seq", "erase \(selStartBeat)–\(selEndBeat) beats")
-        objectWillChange.send()
+        for tid in targetIDs(allTrackIDs) { removeNotes(tid, from: selStartBeat, to: selEndBeat) }
+        refreshContent(); objectWillChange.send()
     }
 
-    /// Cut = ripple: copy the span, remove it, and slide everything after it back
-    /// (closing the gap). Cutting across all tracks also shrinks the song length.
     func cutSelection(allTrackIDs: [UUID]) {
         guard hasSelection else { return }
         copySelection(allTrackIDs: allTrackIDs)
         let ids = targetIDs(allTrackIDs)
-        let a = selStartBeat * secondsPerBeat
-        let barLen = Double(beatsPerBar) * secondsPerBeat
+        let a = selStartBeat
         if selectionAllTracks {
-            // All-tracks cut removes time from the song, so the note-shift and the
-            // song-length shrink must use the SAME whole-bar span (else they desync).
             let removedBars = Int(((selEndBeat - selStartBeat) / Double(beatsPerBar)).rounded())
             if removedBars >= 1 {
-                let b = a + Double(removedBars) * barLen
+                let b = a + Double(removedBars * beatsPerBar)
                 for tid in ids { rippleRemove(tid, from: a, to: b) }
                 loopBars = max(1, loopBars - removedBars)
             } else {
-                let b = selEndBeat * secondsPerBeat   // sub-bar: just clear in place
-                for tid in ids { removeNotes(tid, from: a, to: b) }
+                for tid in ids { removeNotes(tid, from: a, to: selEndBeat) }
             }
         } else {
-            let b = selEndBeat * secondsPerBeat        // one track ripples by the exact span
-            for tid in ids { rippleRemove(tid, from: a, to: b) }
+            for tid in ids { rippleRemove(tid, from: a, to: selEndBeat) }
         }
-        clearSelection()
-        refreshContent()
-        diag("seq", "cut (allTracks: \(selectionAllTracks))")
-        objectWillChange.send()
+        clearSelection(); refreshContent(); objectWillChange.send()
     }
 
     private func rippleRemove(_ tid: UUID, from a: Double, to b: Double) {
         let span = b - a
         var out: [NoteEvent] = []
         for r in noteRects(for: tid) {
-            if r.start >= a && r.start < b { continue }        // inside the cut → removed
-            let shift = r.start >= b ? -span : 0               // after the cut → slide back
+            if r.start >= a && r.start < b { continue }
+            let shift = r.start >= b ? -span : 0
             out.append(NoteEvent(time: r.start + shift, note: r.note, velocity: r.vel, isOn: true))
             out.append(NoteEvent(time: r.end + shift, note: r.note, velocity: 0, isOn: false))
         }
         clips[tid] = out.sorted { $0.time < $1.time }
     }
 
-    /// Paste the clipboard at the playhead. A single-track copy lands on the
-    /// selected track; a multi-track copy keeps its original tracks.
     func pasteClipboard(selectedTrackID: UUID?) {
         guard hasClipboard else { return }
-        let at = max(0, positionSeconds)
+        let at = max(0, positionBeats)
         let single = clipboard.count == 1 && !selectionAllTracks
         for (origID, notes) in clipboard {
             let tid = single ? (selectedTrackID ?? origID) : origID
@@ -170,9 +181,7 @@ final class Sequencer: ObservableObject {
             }
             clips[tid]?.sort { $0.time < $1.time }
         }
-        hasContent = true
-        diag("seq", "paste at \(String(format: "%.2f", at))s")
-        objectWillChange.send()
+        hasContent = true; objectWillChange.send()
     }
 
     private func removeNotes(_ tid: UUID, from a: Double, to b: Double) {
@@ -185,60 +194,28 @@ final class Sequencer: ObservableObject {
         clips[tid] = out.sorted { $0.time < $1.time }
     }
 
-    private func refreshContent() {
-        hasContent = clips.values.contains { !$0.isEmpty }
-    }
-
-    // Tempo grid
-    @Published var bpm = 120.0 { didSet { bpm = min(300, max(20, bpm)) } }
-    @Published var loopBars = 4
-    @Published var metronomeOn = false { didSet { diag("seq", "metronome \(metronomeOn ? "ON" : "off")") } }
-    let beatsPerBar = 4
-
-    /// Playback emits notes through this (set by AppModel → AudioEngine).
-    var onEvent: ((NoteEvent, UUID) -> Void)?
-    /// Fires once per beat (downbeat = true on beat 1) — drives the metronome.
-    var onBeat: ((Bool) -> Void)?
-    /// Which track recording lands on (the selected track).
-    var recordTrackID: (() -> UUID?)?
-
-    /// Loop length is now a musical grid: bars × beats at the current tempo.
-    var loopLength: Double { Double(loopBars * beatsPerBar) * 60.0 / bpm }
-    private var secondsPerBeat: Double { 60.0 / bpm }
-
-    private var clips: [UUID: [NoteEvent]] = [:]
-    private var timer: Timer?
-    private var anchor: Date?
-    private var lastPos = 0.0
-    private var lastBeat = -1
-    private var active: [(note: UInt8, track: UUID)] = []   // sounding notes, for clean stop/loop
-    private var quantizeDelta: [UInt8: Double] = [:]        // per-note start shift while recording quantized
+    private func refreshContent() { hasContent = clips.values.contains { !$0.isEmpty } }
 
     // MARK: - Transport
 
     func play() {
         guard !isPlaying else { return }
-        // Start at the loop region if one is set; else honor count-in when armed.
-        let startPos: Double
+        let startBeat: Double
         if loopEnabled && hasLoopRegion {
-            startPos = loopStartSec
+            startBeat = loopStartBeat
         } else if isRecordArmed && countInEnabled {
-            startPos = -Double(beatsPerBar) * secondsPerBeat
+            startBeat = -Double(beatsPerBar)
         } else {
-            startPos = positionSeconds
+            startBeat = positionBeats
         }
         isPlaying = true
-        positionSeconds = startPos
-        isCountingIn = startPos < 0
-        anchor = Date().addingTimeInterval(-startPos)
-        // Seed just below the start so an event at exactly position 0 still fires
-        // (fireEvents uses an exclusive lower bound).
-        lastPos = startPos == 0 ? -1e-6 : startPos
+        positionBeats = startBeat
+        isCountingIn = startBeat < 0
+        anchorBeat = startBeat
+        anchorDate = Date()
+        lastPos = startBeat == 0 ? -1e-6 : startBeat
         lastBeat = Int.min
-        diag("seq", "play (\(Int(bpm)) bpm, \(loopBars) bars, loop \(String(format: "%.1f", loopLength))s)")
-        // .common run-loop modes so the clock keeps ticking during UI tracking
-        // (scrolling, touches, sheet presentation) — otherwise the metronome and
-        // playback stall whenever a finger is down.
+        diag("seq", "play (\(Int(bpm)) bpm, \(loopBars) bars)")
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -250,8 +227,8 @@ final class Sequencer: ObservableObject {
         isPlaying = false
         isRecordArmed = false
         timer?.invalidate(); timer = nil
-        anchor = nil
-        positionSeconds = 0; lastPos = 0
+        anchorDate = nil
+        positionBeats = 0; lastPos = 0
         quantizeDelta.removeAll()
         flushActive()
         diag("seq", "stop")
@@ -262,78 +239,70 @@ final class Sequencer: ObservableObject {
         diag("seq", "record \(isRecordArmed ? "ARMED" : "off")")
     }
 
-    /// Move the playhead to a beat position (snapped). Paste/playback start here.
     func seek(toBeat beat: Double) {
-        let total = Double(loopBars * beatsPerBar)
-        let b = min(max(0, snapBeat(beat)), total)
-        let sec = b * secondsPerBeat
-        positionSeconds = sec
-        lastPos = sec - 1e-6
+        let b = min(max(0, snapBeat(beat)), totalBeats)
+        positionBeats = b
+        lastPos = b - 1e-6
         lastBeat = Int.min
-        if isPlaying { anchor = Date().addingTimeInterval(-sec) }   // relocate playback too
+        if isPlaying { anchorBeat = b; anchorDate = Date() }
     }
 
     func clear() {
-        clips.removeAll()
-        quantizeDelta.removeAll()
-        hasContent = false
+        clips.removeAll(); quantizeDelta.removeAll(); hasContent = false
     }
 
-    /// Snap an already-recorded track to the current grid (note starts move to
-    /// the nearest grid line; each note keeps its length). No-op if empty.
+    // MARK: - Quantize already-recorded
+
     func quantize(_ trackID: UUID) {
         guard let events = clips[trackID], !events.isEmpty else { return }
-        let g = quantizeGrid.beats * secondsPerBeat
+        let g = quantizeGrid.beats
         var open: [UInt8: (time: Double, vel: UInt8)] = [:]
         var out: [NoteEvent] = []
+        func snapStart(_ t: Double) -> Double { min(max(0, (t / g).rounded() * g), max(0, totalBeats - 1e-3)) }
         for e in events.sorted(by: { $0.time < $1.time }) {
-            if e.isOn {
-                open[e.note] = (e.time, e.velocity)
-            } else if let o = open[e.note] {
-                let start = min(max(0, (o.time / g).rounded() * g), max(0, loopLength - 1e-3))
+            if e.isOn { open[e.note] = (e.time, e.velocity) }
+            else if let o = open[e.note] {
+                let start = snapStart(o.time)
                 let dur = max(g * 0.5, e.time - o.time)
                 out.append(NoteEvent(time: start, note: e.note, velocity: o.vel, isOn: true))
                 out.append(NoteEvent(time: start + dur, note: e.note, velocity: 0, isOn: false))
                 open[e.note] = nil
             }
         }
-        for (note, o) in open {                       // notes still held at clip end
-            let start = min(max(0, (o.time / g).rounded() * g), max(0, loopLength - 1e-3))
+        for (note, o) in open {
+            let start = snapStart(o.time)
             out.append(NoteEvent(time: start, note: note, velocity: o.vel, isOn: true))
             out.append(NoteEvent(time: start + g, note: note, velocity: 0, isOn: false))
         }
         clips[trackID] = out.sorted { $0.time < $1.time }
-        objectWillChange.send()                       // clips isn't @Published; refresh views
+        objectWillChange.send()
         diag("seq", "quantized track to \(quantizeGrid.rawValue)")
     }
 
-    /// Paired note rectangles (start/end seconds + pitch) for drawing a track's
-    /// clip in the piano-roll. Notes still held at the loop end are clamped.
+    /// Paired note rectangles in BEATS (start/end/pitch/vel) for drawing + editing.
     func noteRects(for trackID: UUID) -> [(start: Double, end: Double, note: UInt8, vel: UInt8)] {
         guard let events = clips[trackID] else { return [] }
         var open: [UInt8: (time: Double, vel: UInt8)] = [:]
         var rects: [(start: Double, end: Double, note: UInt8, vel: UInt8)] = []
         for e in events.sorted(by: { $0.time < $1.time }) {
-            if e.isOn {
-                open[e.note] = (e.time, e.velocity)
-            } else if let o = open[e.note] {
+            if e.isOn { open[e.note] = (e.time, e.velocity) }
+            else if let o = open[e.note] {
                 rects.append((start: o.time, end: e.time, note: e.note, vel: o.vel))
                 open[e.note] = nil
             }
         }
-        for (note, o) in open { rects.append((start: o.time, end: loopLength, note: note, vel: o.vel)) }
+        for (note, o) in open { rects.append((start: o.time, end: totalBeats, note: note, vel: o.vel)) }
         return rects
     }
 
-    // MARK: - Recording (called from AppModel's live-input path)
+    // MARK: - Recording (beats)
 
     func recordNoteOn(_ note: UInt8, velocity: UInt8) {
-        guard isPlaying, isRecordArmed, positionSeconds >= 0, let tid = recordTrackID?() else { return }
-        var time = positionSeconds
+        guard isPlaying, isRecordArmed, positionBeats >= 0, let tid = recordTrackID?() else { return }
+        var time = positionBeats
         if quantizeOn {
-            let grid = quantizeGrid.beats * secondsPerBeat
-            let snapped = (time / grid).rounded() * grid
-            quantizeDelta[note] = snapped - time      // remember the shift...
+            let snapped = snapBeat(time)
+            quantizeDelta[note] = snapped - time
             time = snapped
         }
         clips[tid, default: []].append(NoteEvent(time: time, note: note, velocity: velocity, isOn: true))
@@ -341,58 +310,49 @@ final class Sequencer: ObservableObject {
     }
 
     func recordNoteOff(_ note: UInt8) {
-        guard isPlaying, isRecordArmed, positionSeconds >= 0, let tid = recordTrackID?() else {
-            quantizeDelta[note] = nil
-            return
+        guard isPlaying, isRecordArmed, positionBeats >= 0, let tid = recordTrackID?() else {
+            quantizeDelta[note] = nil; return
         }
-        var time = positionSeconds
-        if quantizeOn, let delta = quantizeDelta[note] {
-            time += delta                              // ...so the end moves with the start (length preserved)
-        }
+        var time = positionBeats
+        if quantizeOn, let delta = quantizeDelta[note] { time += delta }
         quantizeDelta[note] = nil
         clips[tid, default: []].append(NoteEvent(time: time, note: note, velocity: 0, isOn: false))
     }
 
-    // MARK: - Playback clock
+    // MARK: - Playback clock (beats)
 
     private func tick() {
-        guard isPlaying, let anchor else { return }
-        var pos = Date().timeIntervalSince(anchor)
-        // Record as long as needed: grow the song to fit while recording — but
-        // NOT when looping a region (that's an overdub: keep it bounded to the
-        // region instead of silently extending/truncating the take).
+        guard isPlaying, let anchorDate else { return }
+        var pos = anchorBeat + Date().timeIntervalSince(anchorDate) / secondsPerBeat
+        // Grow song to fit a take (not while looping a region — that's overdub).
         if isRecordArmed && pos > 0 && !(loopEnabled && hasLoopRegion) {
-            let barLen = Double(beatsPerBar) * secondsPerBeat
-            let needed = Int(ceil((pos + 0.0001) / barLen))
+            let needed = Int(ceil((pos + 0.001) / Double(beatsPerBar)))
             if needed > loopBars { loopBars = needed }
         }
-        // Wrap point: the loop region's end if set, else the song end.
         let regionLoop = loopEnabled && hasLoopRegion
-        let end = regionLoop ? loopEndSec : loopLength
+        let end = regionLoop ? loopEndBeat : totalBeats
         if pos >= end {
             fireEvents(from: lastPos, to: end)
-            flushActive()                       // no hung notes across the seam
+            flushActive()
             if loopEnabled {
-                let start = regionLoop ? loopStartSec : 0
+                let start = regionLoop ? loopStartBeat : 0
                 let remainder = pos - end
-                self.anchor = Date().addingTimeInterval(-(start + remainder))
-                lastPos = start - 1e-6          // include an event exactly at the loop start
+                anchorBeat = start; self.anchorDate = Date().addingTimeInterval(-remainder * secondsPerBeat)
+                lastPos = start - 1e-6
                 pos = start + remainder
                 fireEvents(from: lastPos, to: pos)
             } else {
                 diag("seq", "reached song end → stop")
-                stop()                          // linear: stop at the end
-                return
+                stop(); return
             }
         } else {
             fireEvents(from: lastPos, to: pos)
         }
         lastPos = pos
-        positionSeconds = pos
+        positionBeats = pos
         if isCountingIn && pos >= 0 { isCountingIn = false }
 
-        // Metronome: fire once when the beat index changes.
-        let beat = Int(floor(pos / secondsPerBeat))
+        let beat = Int(floor(pos))
         if beat != lastBeat {
             lastBeat = beat
             onBeat?(((beat % beatsPerBar) + beatsPerBar) % beatsPerBar == 0)
@@ -417,18 +377,14 @@ final class Sequencer: ObservableObject {
 
     // MARK: - Readout
 
-    /// "bar.beat" (1-based), or "IN n" during the count-in.
     var positionLabel: String {
-        if positionSeconds < 0 {
-            return "IN \(Int(ceil(-positionSeconds / secondsPerBeat)))"
-        }
-        let beat = Int(floor(positionSeconds / secondsPerBeat))
+        if positionBeats < 0 { return "IN \(Int(ceil(-positionBeats)))" }
+        let beat = Int(floor(positionBeats))
         return "\(beat / beatsPerBar + 1).\(beat % beatsPerBar + 1)"
     }
 
-    /// Current beat within the bar (0-based) — for the beat dots.
     var beatInBar: Int {
-        let beat = Int(floor(positionSeconds / secondsPerBeat))
+        let beat = Int(floor(positionBeats))
         return ((beat % beatsPerBar) + beatsPerBar) % beatsPerBar
     }
 }
