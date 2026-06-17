@@ -43,6 +43,13 @@ struct ConfigurationView: View {
                     }
                 }
 
+                Section("Build") {
+                    let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+                    let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+                    Text("AstroLab \(v) · build \(b)")
+                        .font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary)
+                }
+
                 Section("Connected MIDI inputs") {
                     if model.midi.sourceNames.isEmpty {
                         Text("None — connect a controller").foregroundStyle(.secondary)

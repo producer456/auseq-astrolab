@@ -154,16 +154,25 @@ final class AudioEngine: ObservableObject {
                     self.lastError = "Load \(name): no audio unit"
                     return
                 }
-                // Restoring a saved patch can throw an ObjC exception for some
-                // plugins (bad/foreign state) — contain it so load never crashes.
-                if let fullState {
-                    if let err = AUSeqTryCatch({ unit.auAudioUnit.fullState = fullState }) {
-                        self.lastError = "Restore patch \(name): \(err.localizedDescription)"
-                        diag("audio", "fullState restore threw: \(err.localizedDescription)")
-                    }
-                }
+                crumb("AE: instantiated \(name), attaching")
                 self.attach(unit, name: name, desc: desc, to: trackID)
                 completion(name)
+                // Restore the saved patch only AFTER the unit is attached and the
+                // engine is running, on a later runloop turn. Setting fullState on
+                // a just-instantiated unit can put it in a state that aborts when
+                // the engine allocates render resources — deferring is safer. Wrap
+                // in @try/@catch for any ObjC throw (the C++ abort case is logged
+                // via the breadcrumb written just before).
+                if let fullState {
+                    DispatchQueue.main.async {
+                        crumb("AE: applying fullState to \(name)")
+                        if let err = AUSeqTryCatch({ unit.auAudioUnit.fullState = fullState }) {
+                            self.lastError = "Restore patch \(name): \(err.localizedDescription)"
+                            diag("audio", "fullState restore threw: \(err.localizedDescription)")
+                        }
+                        crumb("AE: fullState applied to \(name)")
+                    }
+                }
             }
         }
     }
@@ -178,6 +187,7 @@ final class AudioEngine: ObservableObject {
         let mixer = AVAudioMixerNode()
         engine.attach(unit)
         engine.attach(mixer)
+        crumb("AE: connect \(name)")
         // nil format → the engine infers from the node, which is safer than
         // reading outputFormat while the engine is stopped (some AUv3s report a
         // stale/invalid format then, throwing on start and silencing the track).
@@ -193,6 +203,7 @@ final class AudioEngine: ObservableObject {
             start()
             return
         }
+        crumb("AE: connected \(name), starting engine")
 
         hosts[trackID] = TrackAudio(
             unit: unit,

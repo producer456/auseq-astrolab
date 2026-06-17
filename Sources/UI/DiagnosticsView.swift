@@ -8,8 +8,29 @@ struct DiagnosticsView: View {
 
     private var shown: [DiagLog.Entry] { Array(log.entries.suffix(300).reversed()) }
 
+    @State private var trace = DiagLog.shared.lastBreadcrumbs
+
     var body: some View {
         ScrollView {
+            DisclosureGroup {
+                Text(trace)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                HStack {
+                    ShareLink(item: trace) { Label("Share trace", systemImage: "square.and.arrow.up") }
+                    Spacer()
+                    Button("Refresh") { trace = DiagLog.shared.lastBreadcrumbs }
+                }
+                .font(.caption).padding(.top, 4)
+            } label: {
+                Label("Last load trace (after a crash)", systemImage: "ant.fill")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
+            }
+            .padding(.horizontal, 12).padding(.top, 8)
+
             LazyVStack(alignment: .leading, spacing: 2) {
                 ForEach(shown) { e in
                     HStack(alignment: .top, spacing: 8) {

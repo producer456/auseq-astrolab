@@ -243,14 +243,19 @@ final class AppModel: ObservableObject {
     /// Rebuild the session from disk. Tracks get fresh IDs; clips are restored
     /// immediately, instruments re-instantiate (and reapply their patch) async.
     func loadSong() {
+        DiagLog.shared.beginBreadcrumbs("loadSong")
+        crumb("read file")
         guard let data = try? Data(contentsOf: songURL),
               let doc = try? JSONDecoder().decode(SongDocument.self, from: data) else {
-            diag("song", "load: no saved song"); return
+            diag("song", "load: no saved song"); crumb("ABORT: decode failed/no file"); return
         }
+        crumb("decoded \(doc.tracks.count) tracks")
         sequencer.stop()
+        crumb("removeAllTracks")
         audio.removeAllTracks()
         sequencer.clear()
         tracks.removeAll()
+        crumb("apply settings")
 
         sequencer.bpm = doc.bpm
         sequencer.loopBars = doc.loopBars
@@ -261,7 +266,8 @@ final class AppModel: ObservableObject {
         sequencer.loopStartBeat = doc.loopStartBeat
         sequencer.loopEndBeat = doc.loopEndBeat
 
-        for td in doc.tracks {
+        for (i, td) in doc.tracks.enumerated() {
+            crumb("track \(i): build '\(td.name)'")
             let color = Color(.sRGB, red: Double(td.red), green: Double(td.green), blue: Double(td.blue))
             let track = Track(name: td.name, color: color)
             track.volume = td.volume
@@ -272,6 +278,7 @@ final class AppModel: ObservableObject {
             track.armed = false
             tracks.append(track)
 
+            crumb("track \(i): load \(td.notes.count) notes")
             sequencer.loadClip(td.notes.map {
                 Sequencer.NoteEvent(time: $0.time, note: $0.note, velocity: $0.velocity, isOn: $0.isOn)
             }, for: track.id)
@@ -285,7 +292,9 @@ final class AppModel: ObservableObject {
                 let state = td.fullState.flatMap {
                     (try? PropertyListSerialization.propertyList(from: $0, options: [], format: nil)) as? [String: Any]
                 }
+                crumb("track \(i): instantiate '\(td.instrumentName)' (state=\(state == nil ? "no" : "yes"))")
                 audio.loadInstrument(description: desc, name: td.instrumentName, fullState: state, for: track.id) { [weak self] _ in
+                    crumb("track instrument attached: \(td.instrumentName)")
                     track.hasInstrument = true
                     self?.audio.setVolume(track.muted ? 0 : track.volume, for: track.id)
                     self?.audio.setPan(track.pan, for: track.id)
@@ -294,6 +303,7 @@ final class AppModel: ObservableObject {
             }
         }
 
+        crumb("select track")
         if tracks.isEmpty {
             addTrack()
         } else {
@@ -302,6 +312,7 @@ final class AppModel: ObservableObject {
             setArmed(tracks[idx])
         }
         objectWillChange.send()
+        crumb("loadSong returned OK (instruments may still be attaching)")
         diag("song", "loaded \(doc.tracks.count) tracks")
     }
 
