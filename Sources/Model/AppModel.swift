@@ -255,16 +255,20 @@ final class AppModel: ObservableObject {
         audio.removeAllTracks()
         sequencer.clear()
         tracks.removeAll()
-        crumb("apply settings")
-
-        sequencer.bpm = doc.bpm
-        sequencer.loopBars = doc.loopBars
+        crumb("set bpm \(doc.bpm)")
+        sequencer.bpm = doc.bpm.isFinite ? doc.bpm : 120
+        crumb("set loopBars \(doc.loopBars)")
+        sequencer.loopBars = max(1, doc.loopBars)          // 0/neg would crash ForEach(0..<loopBars)
+        crumb("set quantize")
         sequencer.quantizeOn = doc.quantizeOn
         sequencer.quantizeGrid = QuantizeGrid(rawValue: doc.quantizeGrid) ?? .d16
+        crumb("set loop flags")
         sequencer.loopEnabled = doc.loopEnabled
         sequencer.countInEnabled = doc.countInEnabled
-        sequencer.loopStartBeat = doc.loopStartBeat
-        sequencer.loopEndBeat = doc.loopEndBeat
+        crumb("set loop region \(doc.loopStartBeat)–\(doc.loopEndBeat)")
+        sequencer.loopStartBeat = doc.loopStartBeat.isFinite ? max(0, doc.loopStartBeat) : 0
+        sequencer.loopEndBeat = doc.loopEndBeat.isFinite ? max(0, doc.loopEndBeat) : 0
+        crumb("settings done")
 
         for (i, td) in doc.tracks.enumerated() {
             crumb("track \(i): build '\(td.name)'")

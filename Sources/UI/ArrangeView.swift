@@ -161,8 +161,8 @@ private struct RulerTimeline: View {
                     Rectangle().fill(Theme.orange.opacity(0.3))
                         .frame(width: max(2, x2 - x1), height: h).position(x: (x1 + x2) / 2, y: h / 2)
                 }
-                ForEach(0..<seq.loopBars, id: \.self) { bar in
-                    let x = CGFloat(bar) / CGFloat(seq.loopBars) * w
+                ForEach(0..<max(1, seq.loopBars), id: \.self) { bar in
+                    let x = CGFloat(bar) / CGFloat(max(1, seq.loopBars)) * w
                     Text("\(bar + 1)").font(Theme.mono(9, .semibold)).foregroundStyle(Theme.etchedSoft)
                         .position(x: x + 8, y: h / 2)
                 }
