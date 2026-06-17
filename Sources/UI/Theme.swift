@@ -545,11 +545,17 @@ struct NavWheel: View {
                 .overlay(Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.7), .black.opacity(0.3)],
                                                               startPoint: .top, endPoint: .bottom), lineWidth: 1.2))
                 .shadow(color: .black.opacity(0.35), radius: size * 0.05, y: 2)
-            // Discrete LED ring around the bezel
-            SegmentedLEDRing(progress: progress, color: ringColor, diameter: size * 0.93,
-                             dotRadius: max(1.4, size * 0.019), segments: 32,
-                             sweepDeg: 344, startDeg: 98)
-                .frame(width: size, height: size)
+            // Solid LED bar around the bezel
+            let ringD = size * 0.93
+            let ringW = max(3, size * 0.05)
+            let p = max(0, min(1, progress))
+            Circle().stroke(ringColor.opacity(0.16), lineWidth: ringW)
+                .frame(width: ringD, height: ringD)
+            Circle().trim(from: 0, to: max(0.001, p))
+                .stroke(ringColor, style: StrokeStyle(lineWidth: ringW, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .frame(width: ringD, height: ringD)
+                .shadow(color: ringColor.opacity(0.8), radius: size * 0.045)
             // Recessed round screen (dark glass)
             Circle().fill(Color(red: 0.055, green: 0.07, blue: 0.095))
                 .frame(width: screenD, height: screenD)

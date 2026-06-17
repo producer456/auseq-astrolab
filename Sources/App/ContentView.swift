@@ -237,10 +237,6 @@ struct ContentView: View {
             } else {
                 WheelKnobDeck(model: model, tone: woodTone, wheelSize: 168, reservedHeight: 120)
             }
-            if !isPhone {
-                Text(midiSummary).font(Theme.mono(8.5, .medium)).tracking(1)
-                    .foregroundStyle(woodTone.ink.opacity(0.6))
-            }
         }
         .padding(.horizontal, isPhone ? 12 : 16)
         .padding(.top, isPhone ? 5 : 7)
