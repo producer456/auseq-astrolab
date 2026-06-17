@@ -243,7 +243,16 @@ final class AppModel: ObservableObject {
     /// Rebuild the session from disk. Tracks get fresh IDs; clips are restored
     /// immediately, instruments re-instantiate (and reapply their patch) async.
     func loadSong() {
+        // Run off the Menu button's SwiftUI transaction. Mutating tons of
+        // @Published state (and tearing down the audio engine) synchronously
+        // inside the tap action can force a re-render mid-mutation and crash;
+        // deferring lets the menu dismiss and the view tree settle first.
         DiagLog.shared.beginBreadcrumbs("loadSong")
+        crumb("scheduled (deferred off menu action)")
+        DispatchQueue.main.async { [weak self] in self?.performLoadSong() }
+    }
+
+    private func performLoadSong() {
         crumb("read file")
         guard let data = try? Data(contentsOf: songURL),
               let doc = try? JSONDecoder().decode(SongDocument.self, from: data) else {
@@ -257,6 +266,7 @@ final class AppModel: ObservableObject {
         tracks.removeAll()
         crumb("set bpm \(doc.bpm)")
         sequencer.bpm = doc.bpm.isFinite ? doc.bpm : 120
+        crumb("bpm ok")
         crumb("set loopBars \(doc.loopBars)")
         sequencer.loopBars = max(1, doc.loopBars)          // 0/neg would crash ForEach(0..<loopBars)
         crumb("set quantize")

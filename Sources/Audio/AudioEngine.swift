@@ -235,9 +235,12 @@ final class AudioEngine: ObservableObject {
     /// loading a song, to avoid churning the engine once per track (which can
     /// trip AVAudioEngine assertions).
     func removeAllTracks() {
+        crumb("AE.removeAll: stop (\(hosts.count) hosts)")
         if engine.isRunning { engine.stop(); clickNeedsRestart = true }
         for id in Array(hosts.keys) { removeHostNodes(id) }
+        crumb("AE.removeAll: start")
         start()
+        crumb("AE.removeAll: done")
     }
 
     func hasInstrument(_ trackID: UUID) -> Bool { hosts[trackID] != nil }
