@@ -85,6 +85,7 @@ final class AppModel: ObservableObject {
         selectedTrackID = track.id
         paramBank = 0
         setArmed(track)        // selected track auto-arms (single-arm)
+        syncBrowseToSelection() // point the big wheel at this track's instrument
     }
 
     private func setArmed(_ track: Track) {
@@ -130,12 +131,40 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
     }
 
+    // MARK: - Sound browse (the big wheel — driven on-screen and by the KeyLab jog)
+
+    /// Index into the instrument list the big wheel is currently showing.
+    @Published var browseIndex = 0
+
+    /// Point the wheel at the selected track's loaded instrument (called on track
+    /// change / after a load), so turning the jog browses from there.
+    func syncBrowseToSelection() {
+        if let name = selectedTrack?.instrumentName,
+           let i = browser.instruments.firstIndex(where: { $0.name == name }) {
+            browseIndex = i
+        }
+    }
+
+    /// Step the wheel through the instrument list (KeyLab jog turn).
+    func browseStep(_ delta: Int) {
+        let n = browser.instruments.count
+        guard n > 0, delta != 0 else { return }
+        browseIndex = ((browseIndex + delta) % n + n) % n
+    }
+
+    /// Load the currently-browsed instrument onto the selected track (jog press).
+    func browseCommit() {
+        guard let track = selectedTrack, browser.instruments.indices.contains(browseIndex) else { return }
+        assignInstrument(browser.instruments[browseIndex], to: track)
+    }
+
     func assignInstrument(_ component: AVAudioUnitComponent, to track: Track) {
         diag("app", "load '\(component.name)' → \(track.name)")
         audio.loadInstrument(component, for: track.id) { [weak self] name in
             track.instrumentName = name
             track.hasInstrument = true
             self?.paramBank = 0
+            self?.syncBrowseToSelection()
             // ContentView observes AppModel, not the individual Track, so the
             // async load completing on a Track doesn't refresh it. Nudge AppModel
             // to re-render now that the AU exists (otherwise the plugin controls
@@ -416,6 +445,12 @@ final class AppModel: ObservableObject {
             let index = Int(cc) - 16
             let delta = value < 0x40 ? Int(value) : -(Int(value) - 0x40)   // MCU relative
             nudgeParameter(index, by: delta)
+        case let .controlChange(cc, value, _) where cc == 60:
+            // KeyLab big knob (MCU jog wheel, CC 60, relative) → browse sounds on the wheel.
+            let delta = value < 0x40 ? Int(value) : -(Int(value) - 0x40)
+            browseStep(delta > 0 ? 1 : (delta < 0 ? -1 : 0))
+        case let .controlChange(cc, value, _):
+            diag("ctrl", "CC \(cc)=\(value)")   // log unmapped CCs (helps ID the big knob)
         case let .pitchBend(value, channel):
             // MCU faders = pitch bend per channel → that track's volume.
             setFaderVolume(channel: Int(channel), value: Float(value) / 16383.0)
@@ -429,7 +464,8 @@ final class AppModel: ObservableObject {
             case 91: stepPreset(-1)            // MCU Rewind ◀◀ → previous preset
             case 92: stepPreset(1)             // MCU Forward ▶▶ → next preset
             case 24...31: selectTrackByIndex(Int(note) - 24)  // MCU Select buttons under faders
-            default: break          // fader touch (104), etc. ignored
+            case 0x65, 0x54: browseCommit()  // big-knob press (best guess: MCU scrub/zoom) → load browsed sound
+            default: diag("ctrl", "note \(note) v\(velocity)")  // log unmapped notes (helps ID the big-knob press)
             }
         default:
             break

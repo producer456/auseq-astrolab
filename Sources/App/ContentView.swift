@@ -10,11 +10,16 @@ struct SoundBrowserWheel: View {
     private var instruments: [AVAudioUnitComponent] { model.browser.instruments }
 
     var body: some View {
+        let count = instruments.count
+        let bidx = count > 0 ? min(max(0, model.browseIndex), count - 1) : 0
+        let browsed = count > 0 ? instruments[bidx].name : nil
         let loaded = model.selectedTrack?.instrumentName
         let hasInst = model.selectedTrack?.hasInstrument ?? false
-        let title = hasInst ? (loaded ?? "—") : "LOAD"
-        let sub = instruments.isEmpty ? "no sounds"
-                                      : (hasInst ? "tap to change sound" : "tap to load a sound")
+        // Show whatever the wheel is browsing (on-screen or via the KeyLab jog).
+        let title = browsed ?? (hasInst ? (loaded ?? "—") : "LOAD")
+        let pending = browsed != nil && (!hasInst || browsed != loaded)
+        let sub = count == 0 ? "no sounds"
+                             : (pending ? "tap / press knob to load" : "tap to change · turn knob")
 
         // The wheel IS the plugin loader for the selected track — pick a sound and
         // it loads onto whatever track is selected (no need to load one first).
@@ -95,9 +100,13 @@ struct ContentView: View {
                 panelGroove
                 HStack(spacing: 0) {
                     TrackRail(model: model, onExpand: { showingTracks = true })
-                    Rectangle().fill(Theme.gold.opacity(0.5)).frame(width: 1)
+                    Rectangle().fill(.black.opacity(0.18)).frame(width: 2)   // machined seam
                     contentColumn
                 }
+                .recessedPanel(radius: 16)                                   // display module sunk into the chassis
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, keyboardVisible ? 6 : 12)
                 if keyboardVisible {
                     PianoKeyboardView(model: model, height: 190)
                         .padding(.horizontal, 12).padding(.bottom, 12)
@@ -114,6 +123,10 @@ struct ContentView: View {
                 woodPanel
                 panelGroove
                 contentColumn
+                    .recessedPanel(radius: 14)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, keyboardVisible ? 4 : 8)
                 if keyboardVisible {
                     PianoKeyboardView(model: model, height: 140)
                         .padding(.horizontal, 8).padding(.bottom, 8)

@@ -350,6 +350,34 @@ extension View {
     }
 }
 
+/// Makes a region read as a screen/display recessed into the metal chassis:
+/// rounded, a soft inner top shadow (sunk in), and a dark-top/light-bottom rim.
+struct RecessedPanel: ViewModifier {
+    var radius: CGFloat = 14
+    func body(content: Content) -> some View {
+        content
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(   // top inner shadow → reads as sunk into the chassis
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(Color.black.opacity(0.32), lineWidth: 4)
+                    .blur(radius: 4)
+                    .mask(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .center)))
+                    .allowsHitTesting(false)
+            )
+            .overlay(   // machined rim: dark lip up top, catches light at the bottom
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(LinearGradient(colors: [.black.opacity(0.42), .white.opacity(0.5)],
+                                                 startPoint: .top, endPoint: .bottom), lineWidth: 1.2)
+                    .allowsHitTesting(false)
+            )
+    }
+}
+
+extension View {
+    func recessedPanel(radius: CGFloat = 14) -> some View { modifier(RecessedPanel(radius: radius)) }
+}
+
 /// Dotted grille texture for empty states (light dots on white).
 struct PerforatedGrille: View {
     var dotColor: Color = .black.opacity(0.10)
