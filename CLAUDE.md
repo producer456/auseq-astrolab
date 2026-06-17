@@ -9,9 +9,15 @@ This is the **v2.1 fork** where features get experimented on. **v1.0 (`~/auseq`)
 Cross-pollination with Legion Stage (`stage-ipad`) is underway. Done in v2.1 so far:
 - **Beat-native engine** (from Stage): `Sequencer` stores all musical time in beats, re-bases the wall clock on tempo changes → tempo-independent, drift-free, persistence-ready.
 - **Broadened MIDI** (Stage has no real MIDI 2.0 — it's legacy MIDI 1.0 over `MIDIPacketList`; AUSeq is already on the modern UMP API): parse + forward **poly/channel aftertouch, program change** to the track instrument; **system real-time Start/Continue/Stop** drives the sequencer transport.
-- **Song save/load** (`SongStore.swift` Codable → `Documents/auseq-song.json`): transport/grid settings + per-track instrument identity (`AudioComponentDescription`) + full AU patch (`fullState`, plist→Data) + mixer + all notes. Top-bar **folder menu** = Save / Open Last Song. Instruments re-instantiate out-of-process and reapply state on load.
+- **Song save/load** (`SongStore.swift` Codable → `Documents/auseq-song.json`): transport/grid settings + per-track instrument identity (`AudioComponentDescription`) + full AU patch (`fullState`, plist→Data) + mixer + all notes. Top-bar **folder menu** = Save / Open Last Song. Instruments re-instantiate out-of-process and reapply state on load. **Device-verified working on Paddy 2026-06-17** (load + patch restore). Crash on load was a `@Published bpm` didSet self-assignment recursion — fixed; see [[feedback_published_didset_recursion]]. Also added on load: fresh-`AVAudioEngine` rebuild (avoids dangling out-of-process AUv3 render state) + deferred `fullState` restore + persistent fsync'd breadcrumbs (⚙️→Diagnostics "Last load trace").
 
-**Next in the cross-ref plan:** Pass 1 → scenes / clip-launch (from Stage). Pass 2 → port AUSeq's ripple cut/copy/erase/paste into `stage-ipad`'s arranger (**flag before modifying that separate project**). Deferred: true MIDI 2.0 high-res ("option A") — left as a scoped decision since it touches the working KeyLab MCU decode + AU output path.
+**OTA install:** `scripts/deploy-direct.sh` → tailnet HTTPS install page (no home network / cable needed). Use `method=development` not ad-hoc (org team can't make ad-hoc profiles). See [[reference_tailnet_ota_serve]].
+
+### v2.1 backlog
+- **Verify on-device (⚙️ → Verify v2.1):** still UNCONFIRMED — (a) beat-clock tempo change mid-playback (no jump/stutter), (b) aftertouch/program-change forwarding to instrument (needs a controller), (c) external MIDI Start/Continue/Stop drives transport (needs a clock source). Save/load self-test + patch restore already PASS.
+- **Pass 2 (Stage ← AUSeq):** port AUSeq's ripple cut/copy/erase/paste into `stage-ipad`'s arranger (**flag before modifying that separate project**).
+- **Deferred — true MIDI 2.0 high-res** ("option A"): 16-bit vel / 32-bit CC / per-note. Scoped decision, touches the working KeyLab MCU decode + AU output path.
+- **Dropped (David, 2026-06-17):** scenes / clip-launch — not wanted.
 
 ## ▶ v1.0 SHIPPED (2026-06-16)
 
