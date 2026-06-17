@@ -119,6 +119,17 @@ final class AppModel: ObservableObject {
         paramBank = max(0, min(bankCount - 1, paramBank + delta))
     }
 
+    // MARK: - Presets (relocated onto the wood deck)
+
+    var presets: [AUAudioUnitPreset] { selectedAU?.factoryPresets ?? [] }
+    var currentPresetName: String { selectedAU?.currentPreset?.name ?? "Init" }
+
+    func applyPreset(_ preset: AUAudioUnitPreset) {
+        selectedAU?.currentPreset = preset
+        paramBank = 0
+        objectWillChange.send()
+    }
+
     func assignInstrument(_ component: AVAudioUnitComponent, to track: Track) {
         diag("app", "load '\(component.name)' → \(track.name)")
         audio.loadInstrument(component, for: track.id) { [weak self] name in

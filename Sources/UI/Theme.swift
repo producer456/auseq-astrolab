@@ -34,6 +34,10 @@ enum Theme {
     static let woodLight = Color(red: 0.860, green: 0.735, blue: 0.540)
     static let woodDark  = Color(red: 0.745, green: 0.610, blue: 0.400)
 
+    /// Near-black casing that runs to the screen edges so the app blends into the
+    /// iPad's physical bezel — the faceplate sits recessed inside it.
+    static let bezel = Color(red: 0.045, green: 0.050, blue: 0.060)
+
     static let surface = LinearGradient(
         colors: [Color(red: 0.958, green: 0.962, blue: 0.968), Color(red: 0.928, green: 0.934, blue: 0.942)],
         startPoint: .top, endPoint: .bottom)
@@ -136,6 +140,223 @@ struct WoodPanel: View {
     }
 }
 
+/// Selectable wood finish for the deck/inlays.
+enum WoodTone: String, CaseIterable, Identifiable {
+    case oak, walnut
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var next: WoodTone { self == .oak ? .walnut : .oak }
+
+    var light: Color {
+        switch self {
+        case .oak:    return Color(red: 0.860, green: 0.735, blue: 0.540)
+        case .walnut: return Color(red: 0.470, green: 0.335, blue: 0.235)
+        }
+    }
+    var dark: Color {
+        switch self {
+        case .oak:    return Color(red: 0.745, green: 0.610, blue: 0.400)
+        case .walnut: return Color(red: 0.300, green: 0.205, blue: 0.140)
+        }
+    }
+    /// Engraving/ink color that reads on this wood.
+    var ink: Color {
+        switch self {
+        case .oak:    return Theme.etched
+        case .walnut: return Color(red: 0.93, green: 0.88, blue: 0.80)
+        }
+    }
+}
+
+/// Horizontal-grain wood "deck" — the wood rolled in as an internal surface (the
+/// instrument's top panel behind the screen/branding), not an edge cheek. Grain
+/// runs along the band; top/bottom bevels read as a raised panel.
+struct WoodDeck: View {
+    var tone: WoodTone = .oak
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [tone.light.opacity(0.96), tone.dark.opacity(0.94), tone.light.opacity(0.82)],
+                           startPoint: .top, endPoint: .bottom)
+            Canvas { ctx, size in
+                var y: CGFloat = 0
+                while y < size.height {
+                    let h = (Int(y * 7) ^ 0x9E37) & 0xFF
+                    let a = 0.04 + Double(h) / 255.0 * 0.09
+                    ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 0.8)),
+                             with: .color(.black.opacity(a)))
+                    y += CGFloat(1.6 + Double(h % 3))
+                }
+            }
+            .blendMode(.multiply)
+            LinearGradient(colors: [.white.opacity(0.16), .clear, .white.opacity(0.05)],
+                           startPoint: .top, endPoint: .bottom)
+                .blendMode(.softLight)
+            VStack(spacing: 0) {
+                Rectangle().fill(.white.opacity(0.22)).frame(height: 1)
+                Spacer()
+                Rectangle().fill(.black.opacity(0.24)).frame(height: 1)
+            }
+        }
+    }
+}
+
+/// Recessed circular well that makes a control look milled/inlaid into the wood
+/// deck — dark carved interior, inner shadow up top, a raised wood lip below.
+struct WoodInlayCircle: ViewModifier {
+    var size: CGFloat = 40
+    var tone: WoodTone = .oak
+    func body(content: Content) -> some View {
+        content
+            .frame(width: size, height: size)
+            .background(
+                Circle().fill(
+                    RadialGradient(colors: [tone.dark.opacity(0.98), tone.dark.opacity(0.70)],
+                                   center: .center, startRadius: 1, endRadius: size * 0.62)   // concave recess
+                        .shadow(.inner(color: .black.opacity(0.62), radius: 3, y: 1.5))
+                        .shadow(.inner(color: .white.opacity(0.10), radius: 1, y: -1))
+                )
+            )
+            .overlay(Circle().stroke(.black.opacity(0.38), lineWidth: 0.75))                  // carved rim
+            .overlay(Circle().strokeBorder(.white.opacity(0.10), lineWidth: 0.5))             // faint top sheen
+            .overlay(                                                                         // raised wood lip below
+                Circle().stroke(.white.opacity(0.24), lineWidth: 1)
+                    .mask(LinearGradient(colors: [.clear, .black], startPoint: .center, endPoint: .bottom))
+                    .offset(y: 0.7)
+            )
+    }
+}
+
+/// Recessed rounded-rect well — for text/grouped controls inlaid into the wood
+/// (tempo, quantize, bar count).
+struct WoodInlayPill: ViewModifier {
+    var tone: WoodTone = .oak
+    var hPad: CGFloat = 10
+    var vPad: CGFloat = 6
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, hPad).padding(.vertical, vPad)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(
+                    tone.dark.opacity(0.92)
+                        .shadow(.inner(color: .black.opacity(0.60), radius: 2.5, y: 1.5))
+                        .shadow(.inner(color: .white.opacity(0.10), radius: 1, y: -1))
+                )
+                .overlay(RoundedRectangle(cornerRadius: 9).fill(.black.opacity(0.16)))
+            )
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(.black.opacity(0.35), lineWidth: 0.75))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(.white.opacity(0.22), lineWidth: 1)
+                    .mask(LinearGradient(colors: [.clear, .black], startPoint: .center, endPoint: .bottom))
+                    .offset(y: 0.6)
+            )
+    }
+}
+
+extension View {
+    /// Inlay a control into the wood deck (recessed circular well).
+    func woodInlay(size: CGFloat = 40, tone: WoodTone = .oak) -> some View {
+        modifier(WoodInlayCircle(size: size, tone: tone))
+    }
+    /// Inlay a text/grouped control into the wood deck (recessed pill well).
+    func woodInlayPill(tone: WoodTone = .oak, hPad: CGFloat = 10, vPad: CGFloat = 6) -> some View {
+        modifier(WoodInlayPill(tone: tone, hPad: hPad, vPad: vPad))
+    }
+
+    /// Inlay for a KNOB: the wood is bored out to reveal a light metal mounting
+    /// plate (the same surface the LED ring was set in before), so the LED reads
+    /// on metal instead of appearing to shine through the wood.
+    func knobInlay(size: CGFloat, tone: WoodTone = .oak) -> some View {
+        self
+            .frame(width: size, height: size)
+            .background(
+                Circle().fill(
+                    RadialGradient(colors: [Color(white: 0.965), Color(white: 0.855)],
+                                   center: .center, startRadius: 1, endRadius: size * 0.52)
+                        .shadow(.inner(color: .black.opacity(0.22), radius: 2, y: 1.2))
+                )
+            )
+            .overlay(Circle().strokeBorder(tone.dark, lineWidth: 2.5))         // bored wood edge
+            .overlay(Circle().stroke(.black.opacity(0.30), lineWidth: 0.75))
+            .overlay(                                                          // raised wood lip below
+                Circle().stroke(.white.opacity(0.22), lineWidth: 1)
+                    .mask(LinearGradient(colors: [.clear, .black], startPoint: .center, endPoint: .bottom))
+                    .offset(y: 0.6)
+            )
+    }
+}
+
+/// A brushed-metal button cap inlaid into the wood with an LED-backlit function
+/// icon. The icon is always shown in its colour (so the button reads its
+/// function), and glows when `lit`.
+struct InlaidMetalButton: View {
+    var system: String
+    var lit: Bool = true
+    var tint: Color = Theme.orange
+    var size: CGFloat = 40
+    var tone: WoodTone = .oak
+
+    var body: some View {
+        ZStack {
+            // brushed metal cap, slightly domed
+            Circle()
+                .fill(AngularGradient(
+                    colors: [Color(white: 0.93), Color(white: 0.66), Color(white: 0.88),
+                             Color(white: 0.62), Color(white: 0.90), Color(white: 0.66), Color(white: 0.93)],
+                    center: .center))
+                .overlay(Circle().fill(RadialGradient(colors: [.white.opacity(0.6), .clear],
+                                                      center: .init(x: 0.38, y: 0.30),
+                                                      startRadius: 1, endRadius: size * 0.5)))
+                .overlay(Circle().stroke(.black.opacity(0.22), lineWidth: 0.6))
+                .frame(width: size * 0.72, height: size * 0.72)
+                .shadow(color: .black.opacity(0.35), radius: 1.5, y: 1)
+            // LED function icon
+            Image(systemName: system)
+                .font(.system(size: size * 0.30, weight: .bold))
+                .foregroundStyle(lit ? tint : tint.opacity(0.4))
+                .shadow(color: lit ? tint.opacity(0.9) : .clear, radius: lit ? 3.5 : 0)
+                .shadow(color: lit ? tint.opacity(0.6) : .clear, radius: lit ? 7 : 0)
+        }
+        .frame(width: size, height: size)
+        .background(                                                  // wood bore the cap is set into
+            Circle().fill(tone.dark.opacity(0.96)
+                .shadow(.inner(color: .black.opacity(0.6), radius: 2.5, y: 1.2)))
+        )
+        .overlay(Circle().strokeBorder(tone.dark, lineWidth: 1.5))
+        .overlay(Circle().stroke(.black.opacity(0.38), lineWidth: 0.75))
+        .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 1)
+            .mask(LinearGradient(colors: [.clear, .black], startPoint: .center, endPoint: .bottom))
+            .offset(y: 0.7))
+    }
+}
+
+/// Brushed-metal readout pill inlaid into the wood (for text controls — tempo,
+/// quantize, bar, preset). Content keeps its own colour so it reads as an LED.
+struct MetalInlayPill: ViewModifier {
+    var tone: WoodTone = .oak
+    var hPad: CGFloat = 9
+    var vPad: CGFloat = 7
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, hPad).padding(.vertical, vPad)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(white: 0.91), Color(white: 0.71)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(.black.opacity(0.18), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.30), radius: 1, y: 0.5)
+                    .padding(2)
+            )
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tone.dark.opacity(0.96)))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(.black.opacity(0.34), lineWidth: 0.75))
+    }
+}
+
+extension View {
+    func metalInlayPill(tone: WoodTone = .oak, hPad: CGFloat = 9, vPad: CGFloat = 7) -> some View {
+        modifier(MetalInlayPill(tone: tone, hPad: hPad, vPad: vPad))
+    }
+}
+
 /// Dotted grille texture for empty states (light dots on white).
 struct PerforatedGrille: View {
     var dotColor: Color = .black.opacity(0.10)
@@ -165,6 +386,7 @@ struct LEDRingKnob: View {
     var size: CGFloat = 42
     var ring: Color = Theme.ring       // soft mint LED band, like the AstroLab
     var bipolar: Bool = false          // centered params light from 12 o'clock outward
+    var onEditing: (Bool) -> Void = { _ in }   // true when a turn begins, false when it ends
     var onChange: (Double) -> Void
 
     @State private var dragStart: Double?
@@ -223,13 +445,13 @@ struct LEDRingKnob: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { v in
-                    if dragStart == nil { dragStart = value }
+                    if dragStart == nil { dragStart = value; onEditing(true) }
                     let span = range.upperBound - range.lowerBound
                     let nv = min(range.upperBound, max(range.lowerBound,
                         (dragStart ?? value) + Double(-v.translation.height) / 120.0 * span))
                     live = nv; onChange(nv)
                 }
-                .onEnded { _ in dragStart = nil; live = nil }
+                .onEnded { _ in dragStart = nil; live = nil; onEditing(false) }
         )
     }
 }
@@ -250,20 +472,21 @@ struct NavWheel: View {
                 .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
             Circle().trim(from: 0, to: 0.82)
                 .stroke(lit ? Theme.orange : Theme.etchedSoft.opacity(0.4),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        style: StrokeStyle(lineWidth: max(3, size * 0.033), lineCap: .round))
                 .rotationEffect(.degrees(126))
-                .frame(width: size - 8, height: size - 8)
-                .shadow(color: lit ? Theme.orange.opacity(0.6) : .clear, radius: 3)
+                .frame(width: size * 0.91, height: size * 0.91)
+                .shadow(color: lit ? Theme.orange.opacity(0.6) : .clear, radius: size * 0.035)
             Circle().fill(Color(red: 0.07, green: 0.085, blue: 0.11))
-                .frame(width: size - 22, height: size - 22)
+                .frame(width: size * 0.76, height: size * 0.76)
                 .overlay(Circle().stroke(.white.opacity(0.06), lineWidth: 1))
-            VStack(spacing: 2) {
-                Image(systemName: glyph).font(.system(size: 16, weight: .semibold))
+            VStack(spacing: size * 0.02) {
+                Image(systemName: glyph).font(.system(size: size * 0.17, weight: .semibold))
                     .foregroundStyle(Theme.orange)
-                Text(title).font(Theme.mono(11, .bold)).foregroundStyle(.white).lineLimit(1)
-                Text(subtitle).font(Theme.mono(7, .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                Text(title).font(Theme.mono(size * 0.12, .bold)).foregroundStyle(.white).lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(subtitle).font(Theme.mono(max(7, size * 0.072), .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
             }
-            .frame(width: size - 30)
+            .frame(width: size * 0.70)
         }
         .frame(width: size, height: size)
     }

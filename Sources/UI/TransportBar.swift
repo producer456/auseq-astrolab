@@ -2,75 +2,62 @@ import SwiftUI
 
 /// Transport strip (M6) — driven by both the KeyLab's transport buttons and
 /// these on-screen controls. Shows Stop / Play / Record and the position clock.
+/// Sits on the wood deck with its controls milled in (inlaid wells).
 struct TransportBar: View {
     @ObservedObject var seq: Sequencer
     var onQuantizeSelected: () -> Void = {}
     var onQuantizeAll: () -> Void = {}
     var compact: Bool = false
+    var tone: WoodTone = .oak
 
     var body: some View {
+        // No background — sits on the shared wood panel provided by the parent.
         if compact {
             ScrollView(.horizontal, showsIndicators: false) { controls }
-                .background(Theme.rail)
         } else {
-            controls.background(Theme.rail)
+            controls
         }
     }
 
     private var controls: some View {
-        HStack(spacing: compact ? 12 : 16) {
-            // Stop
-            transportButton(system: "stop.fill", active: false, tint: Theme.etched) {
-                seq.stop()
-            }
-            // Play
-            transportButton(system: "play.fill", active: seq.isPlaying, tint: Theme.orange) {
-                seq.play()
-            }
-            // Record (arm)
-            transportButton(system: "record.circle", active: seq.isRecordArmed, tint: .red) {
-                seq.toggleRecord()
-            }
+        HStack(spacing: compact ? 10 : 14) {
+            // Stop / Play / Record — metal LED buttons
+            Button { seq.stop() } label: {
+                InlaidMetalButton(system: "stop.fill", lit: true, tint: Color(red: 0.55, green: 0.68, blue: 0.82), size: 42, tone: tone)
+            }.buttonStyle(.plain)
+            Button { seq.play() } label: {
+                InlaidMetalButton(system: "play.fill", lit: seq.isPlaying, tint: Theme.orange, size: 42, tone: tone)
+            }.buttonStyle(.plain)
+            Button { seq.toggleRecord() } label: {
+                InlaidMetalButton(system: "record.circle", lit: seq.isRecordArmed, tint: .red, size: 42, tone: tone)
+            }.buttonStyle(.plain)
 
             Text(seq.positionLabel)
                 .font(Theme.mono(18, .bold))
-                .foregroundStyle(Theme.etched)
+                .foregroundStyle(tone.ink)
                 .monospacedDigit()
                 .frame(width: 54, alignment: .leading)
-                .padding(.leading, 4)
+                .padding(.leading, 2)
 
             // Beat dots
             HStack(spacing: 4) {
                 ForEach(0..<seq.beatsPerBar, id: \.self) { i in
                     Circle()
                         .fill(seq.isPlaying && i == seq.beatInBar
-                              ? (i == 0 ? Theme.orange : Theme.etched)
-                              : Theme.gold.opacity(0.35))
+                              ? (i == 0 ? Theme.orange : tone.ink)
+                              : tone.ink.opacity(0.25))
                         .frame(width: 7, height: 7)
                 }
             }
 
             if !compact { Spacer() }
 
-            // Loop on/off (off = linear play-through)
-            Button { seq.loopEnabled.toggle() } label: {
-                Image(systemName: "repeat")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(seq.loopEnabled ? Theme.orange : Theme.etchedSoft)
-            }
-            // Metronome
-            Button { seq.metronomeOn.toggle() } label: {
-                Image(systemName: "metronome")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(seq.metronomeOn ? Theme.orange : Theme.etchedSoft)
-            }
-            // Count-in
-            Button { seq.countInEnabled.toggle() } label: {
-                Image(systemName: "timer")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(seq.countInEnabled ? Theme.orange : Theme.etchedSoft)
-            }
-            // Quantize: grid + auto-on-record + apply to recorded notes
+            // Loop / metronome / count-in — metal LED toggles
+            iconToggle("repeat", on: seq.loopEnabled) { seq.loopEnabled.toggle() }
+            iconToggle("metronome", on: seq.metronomeOn) { seq.metronomeOn.toggle() }
+            iconToggle("timer", on: seq.countInEnabled) { seq.countInEnabled.toggle() }
+
+            // Quantize menu — metal readout pill
             Menu {
                 Picker("Grid", selection: $seq.quantizeGrid) {
                     ForEach(QuantizeGrid.allCases) { Text($0.rawValue).tag($0) }
@@ -82,56 +69,47 @@ struct TransportBar: View {
             } label: {
                 Text("Q \(seq.quantizeGrid.rawValue)")
                     .font(Theme.mono(12, .bold))
-                    .foregroundStyle(seq.quantizeOn ? Theme.orange : Theme.etchedSoft)
+                    .foregroundStyle(seq.quantizeOn ? Theme.orange : Theme.etched)
+                    .metalInlayPill(tone: tone, hPad: 9, vPad: 8)
             }
 
-            // Tempo
-            HStack(spacing: 6) {
-                Button { seq.bpm = max(40, seq.bpm - 1) } label: { Image(systemName: "minus") }
-                Text("\(Int(seq.bpm))").font(Theme.mono(13, .bold)).foregroundStyle(Theme.etched)
-                    .frame(width: 30)
-                Button { seq.bpm = min(240, seq.bpm + 1) } label: { Image(systemName: "plus") }
-                Text("BPM").etchedLabel(8, soft: true, weight: .medium)
+            // Tempo — metal readout pill with -/+ and BPM
+            HStack(spacing: 8) {
+                Button { seq.bpm = max(40, seq.bpm - 1) } label: {
+                    Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.orange)
+                }
+                Text("\(Int(seq.bpm))").font(Theme.mono(13, .bold)).foregroundStyle(Theme.etched).frame(width: 30)
+                Button { seq.bpm = min(240, seq.bpm + 1) } label: {
+                    Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.orange)
+                }
             }
-            .foregroundStyle(Theme.orange)
+            .metalInlayPill(tone: tone, hPad: 10, vPad: 8)
 
-            // Loop length (bars)
+            // Loop length (bars) — metal readout pill
             Menu {
                 ForEach([1, 2, 4, 8, 16], id: \.self) { bars in
                     Button("\(bars) bar\(bars > 1 ? "s" : "")") { seq.loopBars = bars }
                 }
             } label: {
-                Text("\(seq.loopBars) BAR").etchedLabel(10, weight: .semibold).foregroundStyle(Theme.orange)
+                Text("\(seq.loopBars) BAR")
+                    .font(Theme.mono(11, .bold))
+                    .foregroundStyle(Theme.orange)
+                    .metalInlayPill(tone: tone, hPad: 9, vPad: 8)
             }
 
             if seq.hasContent {
                 Button { seq.clear() } label: {
-                    Image(systemName: "trash").foregroundStyle(Theme.etchedSoft)
+                    InlaidMetalButton(system: "trash", lit: true, tint: Color(red: 0.55, green: 0.68, blue: 0.82), size: 36, tone: tone)
                 }
+                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .padding(.horizontal, 16).padding(.vertical, 9)
     }
 
-    private func transportButton(system: String, active: Bool, tint: Color,
-                                 action: @escaping () -> Void) -> some View {
+    private func iconToggle(_ system: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: system)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(active ? tint : Theme.etchedSoft)
-                .frame(width: 40, height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(active ? tint.opacity(0.18) : Color.white.opacity(0.5))
-                        .overlay(RoundedRectangle(cornerRadius: 7)
-                            .strokeBorder(LinearGradient(colors: [.white.opacity(0.7), .black.opacity(0.05)],
-                                                         startPoint: .top, endPoint: .bottom), lineWidth: 1))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(active ? tint : Theme.gold.opacity(0.4), lineWidth: active ? 1.5 : 1)
-                )
-                .shadow(color: active ? tint.opacity(0.55) : .clear, radius: 6)   // backlit glow
+            InlaidMetalButton(system: system, lit: on, tint: Theme.orange, size: 36, tone: tone)
         }
         .buttonStyle(.plain)
     }

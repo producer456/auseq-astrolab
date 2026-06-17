@@ -3,7 +3,7 @@ import AVFoundation
 
 /// Interactive AstroLab nav wheel: drag to scroll the instrument list (shown on
 /// the wheel screen), tap to load the highlighted sound onto the selected track.
-private struct SoundBrowserWheel: View {
+struct SoundBrowserWheel: View {
     @ObservedObject var model: AppModel
     var size: CGFloat = 88
     @State private var browseIndex = 0
@@ -46,12 +46,13 @@ struct ContentView: View {
     @StateObject private var model = AppModel()
     @State private var showingConfig = false
     @State private var showingTracks = false
-    @State private var keyboardVisible = true
-    @State private var mainMode: MainMode = .params
+    @State private var keyboardVisible = false   // fallback only — opened on demand when no controller
+    @State private var showingPluginUI = false
+    @AppStorage("woodTone") private var woodToneRaw = WoodTone.oak.rawValue
     @Environment(\.horizontalSizeClass) private var hSize
 
-    enum MainMode: String, CaseIterable { case params = "PARAMS", arrange = "ARRANGE" }
     private var isPhone: Bool { hSize == .compact }
+    private var woodTone: WoodTone { WoodTone(rawValue: woodToneRaw) ?? .oak }
 
     var body: some View {
         Group {
@@ -61,6 +62,17 @@ struct ContentView: View {
         .preferredColorScheme(.light)
         .sheet(isPresented: $showingConfig) {
             ConfigurationView(model: model)
+        }
+        .sheet(isPresented: $showingPluginUI) {
+            if let au = model.selectedAU {
+                NavigationStack {
+                    AUPluginUIView(au: au)
+                        .ignoresSafeArea()
+                        .navigationTitle(model.selectedTrack?.instrumentName ?? "Plugin")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showingPluginUI = false } } }
+                }
+            }
         }
         .sheet(isPresented: $showingTracks) {
             NavigationStack {
@@ -72,108 +84,191 @@ struct ContentView: View {
         }
     }
 
-    /// iPad — track list as a fixed sidebar between wood cheeks.
+    /// iPad — faceplate recessed into the dark bezel; wood-deck header spans the
+    /// top, the thin track rail sits beside the content, keyboard along the bottom.
     private var padBody: some View {
         ZStack {
-            BrushedAluminum()
-            HStack(spacing: 0) {
-                WoodPanel().frame(width: 16).ignoresSafeArea()
-                TrackListView(model: model)
-                    .frame(width: 340)
-                    .background(Theme.rail)
-                Rectangle().fill(Theme.gold.opacity(0.5)).frame(width: 1)
-                mainArea
-                WoodPanel().frame(width: 16).ignoresSafeArea()
+            Theme.bezel.ignoresSafeArea()
+            VStack(spacing: 0) {
+                woodPanel
+                panelGroove
+                HStack(spacing: 0) {
+                    TrackRail(model: model, onExpand: { showingTracks = true })
+                    Rectangle().fill(Theme.gold.opacity(0.5)).frame(width: 1)
+                    contentColumn
+                }
+                if keyboardVisible {
+                    PianoKeyboardView(model: model, height: 190)
+                        .padding(.horizontal, 12).padding(.bottom, 12)
+                }
             }
+            .background(faceplate)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(faceplateEdge(28))
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .shadow(color: .black.opacity(0.55), radius: 16, y: 4)
         }
     }
 
-    /// Phone — single column; tracks open in a drawer from the top bar.
+    /// Phone — same faceplate-in-bezel treatment; tracks open in a drawer.
     private var phoneBody: some View {
         ZStack {
-            BrushedAluminum()
-            mainArea
+            Theme.bezel.ignoresSafeArea()
+            VStack(spacing: 0) {
+                woodPanel
+                panelGroove
+                contentColumn
+                if keyboardVisible {
+                    PianoKeyboardView(model: model, height: 140)
+                        .padding(.horizontal, 8).padding(.bottom, 8)
+                }
+            }
+            .background(faceplate)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(faceplateEdge(22))
+            .padding(.horizontal, 6).padding(.vertical, 4)
         }
     }
 
-    private var mainArea: some View {
+    /// The content area below the wood control panel — the arranger fills it now
+    /// that the parameters live as knobs in the wood.
+    private var contentColumn: some View {
+        ArrangeView(model: model, seq: model.sequencer)
+    }
+
+    /// Brushed-aluminium faceplate fill (no safe-area bleed — it's inset in the bezel).
+    private var faceplate: some View {
+        ZStack(alignment: .top) {
+            Theme.surface
+            RadialGradient(colors: [.clear, .black.opacity(0.05)], center: .center, startRadius: 240, endRadius: 820)
+            LinearGradient(colors: [.white.opacity(0.22), .clear], startPoint: .top, endPoint: .center)
+        }
+    }
+
+    /// Recessed edge: bright top lip → dark bottom, so the plate reads as set into the bezel.
+    private func faceplateEdge(_ radius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .strokeBorder(LinearGradient(colors: [.white.opacity(0.35), .black.opacity(0.08), .black.opacity(0.40)],
+                                         startPoint: .top, endPoint: .bottom), lineWidth: 1.5)
+    }
+
+    /// PARAMS panel — the selected track's plugin parameters (or empty-state) plus
+    /// its clip strip.
+    private var paramsRegion: some View {
         VStack(spacing: 0) {
-            topBar
-            GoldHairline()
-            TransportBar(seq: model.sequencer,
-                         onQuantizeSelected: { model.quantizeSelected() },
-                         onQuantizeAll: { model.quantizeAll() },
-                         compact: isPhone)
-            GoldHairline()
-            modePicker
-            if mainMode == .arrange {
-                ArrangeView(model: model, seq: model.sequencer)
+            if let track = model.selectedTrack, track.hasInstrument, let au = model.selectedAU {
+                ParameterListView(au: au, model: model)
+                    .id(track.id)   // rebuild when the selected track changes
             } else {
-                if let track = model.selectedTrack, track.hasInstrument, let au = model.selectedAU {
-                    ParameterListView(au: au, model: model)
-                        .id(track.id)   // rebuild when the selected track changes
-                } else {
-                    Spacer()
-                    status
-                    Spacer()
-                }
-                if model.selectedTrack != nil {
-                    ClipView(seq: model.sequencer, trackID: model.selectedTrackID)
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 6)
-                }
+                Spacer()
+                status
+                Spacer()
             }
-            if keyboardVisible {
-                PianoKeyboardView(model: model, height: isPhone ? 150 : 200)
+            if model.selectedTrack != nil {
+                ClipView(seq: model.sequencer, trackID: model.selectedTrackID)
                     .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 6)
             }
         }
-    }
-
-    private var modePicker: some View {
-        Picker("", selection: $mainMode) {
-            ForEach(MainMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     private var topBar: some View {
-        HStack(spacing: isPhone ? 10 : 16) {
-            if isPhone {
-                Button { showingTracks = true } label: {
-                    Image(systemName: "list.bullet").font(.title3).foregroundStyle(Theme.orange)
+        let well: CGFloat = isPhone ? 34 : 40
+        let icon: CGFloat = isPhone ? 14 : 16
+        return VStack(spacing: isPhone ? 6 : 8) {
+            // Slim control strip: branding + utilities, milled into the wood
+            HStack(spacing: isPhone ? 8 : 12) {
+                if isPhone {
+                    Button { showingTracks = true } label: {
+                        Image(systemName: "list.bullet").font(.system(size: icon, weight: .semibold))
+                            .foregroundStyle(Theme.orange).woodInlay(size: well, tone: woodTone)
+                    }
+                }
+                Text("KEYLAB")
+                    .font(Theme.mono(isPhone ? 16 : 22, .heavy))
+                    .tracking(isPhone ? 2 : 3.5)
+                    .foregroundStyle(woodTone.ink)
+                    .shadow(color: .black.opacity(0.45), radius: 0.5, y: 1)        // engraved (dark below)
+                    .shadow(color: woodTone.light.opacity(0.5), radius: 0.5, y: -0.5) // top sheen
+                // Relocated: preset readout + plugin's own UI (when an instrument is loaded)
+                if model.selectedAU != nil {
+                    Menu {
+                        if model.presets.isEmpty {
+                            Text("No factory presets")
+                        } else {
+                            ForEach(model.presets, id: \.number) { p in
+                                Button { model.applyPreset(p) } label: {
+                                    if p.number == model.selectedAU?.currentPreset?.number {
+                                        Label(p.name, systemImage: "checkmark")
+                                    } else { Text(p.name) }
+                                }
+                            }
+                        }
+                    } label: {
+                        Text(model.currentPresetName)
+                            .font(Theme.mono(11, .bold)).foregroundStyle(Theme.orange)
+                            .lineLimit(1).frame(maxWidth: 120)
+                            .metalInlayPill(tone: woodTone, hPad: 10, vPad: 8)
+                    }
+                    Button { showingPluginUI = true } label: {
+                        InlaidMetalButton(system: "rectangle.inset.filled", lit: true, tint: Theme.orange, size: well, tone: woodTone)
+                    }
+                }
+                Spacer()
+                // Wood finish toggle — LED glows the tone you'll switch TO
+                Button { woodToneRaw = woodTone.next.rawValue } label: {
+                    InlaidMetalButton(system: "circle.fill", lit: true, tint: woodTone.next.light, size: well, tone: woodTone)
+                }
+                Menu {
+                    Button { model.saveSong() } label: { Label("Save Song", systemImage: "square.and.arrow.down") }
+                    Button { model.loadSong() } label: { Label("Open Last Song", systemImage: "tray.and.arrow.up") }
+                        .disabled(!model.hasSavedSong)
+                } label: {
+                    InlaidMetalButton(system: "folder.fill", lit: true, tint: Theme.orange, size: well, tone: woodTone)
+                }
+                Button { showingConfig = true } label: {
+                    InlaidMetalButton(system: "gearshape.fill", lit: true, tint: Theme.orange, size: well, tone: woodTone)
+                }
+                Button { keyboardVisible.toggle() } label: {
+                    InlaidMetalButton(system: "pianokeys", lit: keyboardVisible, tint: Theme.orange, size: well, tone: woodTone)
                 }
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("ASTROLAB")
-                    .font(Theme.mono(isPhone ? 16 : 24, .heavy))
-                    .tracking(isPhone ? 1.5 : 3)
-                    .foregroundStyle(Theme.etched)
-                if !isPhone { Text(midiSummary).etchedLabel(9, soft: true, weight: .medium) }
+            // The "screen" — big nav wheel; on iPad it's flanked by 8 inlaid param knobs.
+            if isPhone {
+                SoundBrowserWheel(model: model, size: 104)
+            } else {
+                WheelKnobDeck(model: model, tone: woodTone, wheelSize: 150)
             }
-            Menu {
-                Button { model.saveSong() } label: { Label("Save Song", systemImage: "square.and.arrow.down") }
-                Button { model.loadSong() } label: { Label("Open Last Song", systemImage: "tray.and.arrow.up") }
-                    .disabled(!model.hasSavedSong)
-            } label: {
-                Image(systemName: "folder.fill")
-                    .font(.title3).foregroundStyle(Theme.orange)
+            if !isPhone {
+                Text(midiSummary).font(Theme.mono(9, .medium)).tracking(1)
+                    .foregroundStyle(woodTone.ink.opacity(0.65))
             }
-            Button { showingConfig = true } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.title3).foregroundStyle(Theme.orange)
-            }
-            Button { keyboardVisible.toggle() } label: {
-                Image(systemName: "pianokeys")
-                    .font(.title3).foregroundStyle(keyboardVisible ? Theme.orange : Theme.etchedSoft)
-            }
-            Spacer()
-            // Navigation wheel — scroll to browse sounds, tap to load
-            SoundBrowserWheel(model: model, size: isPhone ? 66 : 88)
         }
-        .padding(.horizontal, isPhone ? 12 : 16).padding(.vertical, isPhone ? 8 : 16)
+        .padding(.horizontal, isPhone ? 12 : 16)
+        .padding(.top, isPhone ? 8 : 12)
+        .padding(.bottom, isPhone ? 6 : 8)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The whole wooden control panel: branding + screen/knobs + transport, all
+    /// on one continuous wood plane.
+    private var woodPanel: some View {
+        VStack(spacing: 0) {
+            topBar
+            TransportBar(seq: model.sequencer,
+                         onQuantizeSelected: { model.quantizeSelected() },
+                         onQuantizeAll: { model.quantizeAll() },
+                         compact: isPhone, tone: woodTone)
+        }
+        .background(WoodDeck(tone: woodTone))
+    }
+
+    /// Seam between the wood panel and the metal faceplate below.
+    private var panelGroove: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(.black.opacity(0.28)).frame(height: 1)
+            Rectangle().fill(.white.opacity(0.55)).frame(height: 1)
+        }
     }
 
     private var midiSummary: String {
