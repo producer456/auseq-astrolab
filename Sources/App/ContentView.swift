@@ -84,11 +84,11 @@ struct ContentView: View {
         }
     }
 
-    /// iPad — faceplate recessed into the dark bezel; wood-deck header spans the
-    /// top, the thin track rail sits beside the content, keyboard along the bottom.
+    /// iPad — edge-to-edge faceplate (fills to the iPad's bezel on all sides);
+    /// wood-deck header runs to the top edge, the rail sits beside the content.
     private var padBody: some View {
-        ZStack {
-            Theme.bezel.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            faceplate.ignoresSafeArea()
             VStack(spacing: 0) {
                 woodPanel
                 panelGroove
@@ -102,18 +102,13 @@ struct ContentView: View {
                         .padding(.horizontal, 12).padding(.bottom, 12)
                 }
             }
-            .background(faceplate)
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay(faceplateEdge(28))
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .shadow(color: .black.opacity(0.55), radius: 16, y: 4)
         }
     }
 
-    /// Phone — same faceplate-in-bezel treatment; tracks open in a drawer.
+    /// Phone — edge-to-edge; tracks open in a drawer.
     private var phoneBody: some View {
-        ZStack {
-            Theme.bezel.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            faceplate.ignoresSafeArea()
             VStack(spacing: 0) {
                 woodPanel
                 panelGroove
@@ -123,10 +118,6 @@ struct ContentView: View {
                         .padding(.horizontal, 8).padding(.bottom, 8)
                 }
             }
-            .background(faceplate)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(faceplateEdge(22))
-            .padding(.horizontal, 6).padding(.vertical, 4)
         }
     }
 
@@ -260,7 +251,8 @@ struct ContentView: View {
                          onQuantizeAll: { model.quantizeAll() },
                          compact: isPhone, tone: woodTone)
         }
-        .background(WoodDeck(tone: woodTone))
+        // Wood fills behind the status bar up to the top edge; content stays below it.
+        .background(WoodDeck(tone: woodTone).ignoresSafeArea(edges: .top))
     }
 
     /// Seam between the wood panel and the metal faceplate below.
