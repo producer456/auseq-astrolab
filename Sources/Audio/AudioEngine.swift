@@ -154,7 +154,14 @@ final class AudioEngine: ObservableObject {
                     self.lastError = "Load \(name): no audio unit"
                     return
                 }
-                if let fullState { unit.auAudioUnit.fullState = fullState }
+                // Restoring a saved patch can throw an ObjC exception for some
+                // plugins (bad/foreign state) — contain it so load never crashes.
+                if let fullState {
+                    if let err = AUSeqTryCatch({ unit.auAudioUnit.fullState = fullState }) {
+                        self.lastError = "Restore patch \(name): \(err.localizedDescription)"
+                        diag("audio", "fullState restore threw: \(err.localizedDescription)")
+                    }
+                }
                 self.attach(unit, name: name, desc: desc, to: trackID)
                 completion(name)
             }
@@ -174,8 +181,18 @@ final class AudioEngine: ObservableObject {
         // nil format → the engine infers from the node, which is safer than
         // reading outputFormat while the engine is stopped (some AUv3s report a
         // stale/invalid format then, throwing on start and silencing the track).
-        engine.connect(unit, to: mixer, format: nil)
-        engine.connect(mixer, to: engine.mainMixerNode, format: nil)
+        // Wrap the connects: a misbehaving plugin can throw an ObjC exception
+        // here, which would otherwise crash the app on load.
+        if let err = AUSeqTryCatch({
+            self.engine.connect(unit, to: mixer, format: nil)
+            self.engine.connect(mixer, to: self.engine.mainMixerNode, format: nil)
+        }) {
+            lastError = "Connect \(name): \(err.localizedDescription)"
+            diag("audio", "connect threw: \(err.localizedDescription)")
+            engine.detach(unit); engine.detach(mixer)
+            start()
+            return
+        }
 
         hosts[trackID] = TrackAudio(
             unit: unit,
@@ -200,6 +217,15 @@ final class AudioEngine: ObservableObject {
         let wasRunning = engine.isRunning
         if wasRunning { engine.stop(); clickNeedsRestart = true }
         removeHostNodes(trackID)
+        start()
+    }
+
+    /// Tear down every track's nodes with a single engine stop/start — used when
+    /// loading a song, to avoid churning the engine once per track (which can
+    /// trip AVAudioEngine assertions).
+    func removeAllTracks() {
+        if engine.isRunning { engine.stop(); clickNeedsRestart = true }
+        for id in Array(hosts.keys) { removeHostNodes(id) }
         start()
     }
 

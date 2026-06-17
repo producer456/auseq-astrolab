@@ -248,7 +248,7 @@ final class AppModel: ObservableObject {
             diag("song", "load: no saved song"); return
         }
         sequencer.stop()
-        for t in tracks { audio.removeTrack(t.id) }
+        audio.removeAllTracks()
         sequencer.clear()
         tracks.removeAll()
 

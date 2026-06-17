@@ -24,6 +24,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.producer456.auseq2
         CODE_SIGN_ENTITLEMENTS: Sources/AUSeq.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/AUSeq-Bridging-Header.h
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
         INFOPLIST_KEY_CFBundleDisplayName: AstroLab
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: "YES"
