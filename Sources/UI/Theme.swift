@@ -297,7 +297,7 @@ struct InlaidMetalButton: View {
 
     var body: some View {
         ZStack {
-            // brushed metal cap, slightly domed
+            // brushed metal cap, slightly domed — sits ON the metal mounting plate
             Circle()
                 .fill(AngularGradient(
                     colors: [Color(white: 0.93), Color(white: 0.66), Color(white: 0.88),
@@ -307,25 +307,18 @@ struct InlaidMetalButton: View {
                                                       center: .init(x: 0.38, y: 0.30),
                                                       startRadius: 1, endRadius: size * 0.5)))
                 .overlay(Circle().stroke(.black.opacity(0.22), lineWidth: 0.6))
-                .frame(width: size * 0.72, height: size * 0.72)
+                .frame(width: size * 0.60, height: size * 0.60)
                 .shadow(color: .black.opacity(0.35), radius: 1.5, y: 1)
             // LED function icon
             Image(systemName: system)
-                .font(.system(size: size * 0.30, weight: .bold))
+                .font(.system(size: size * 0.26, weight: .bold))
                 .foregroundStyle(lit ? tint : tint.opacity(0.4))
                 .shadow(color: lit ? tint.opacity(0.9) : .clear, radius: lit ? 3.5 : 0)
                 .shadow(color: lit ? tint.opacity(0.6) : .clear, radius: lit ? 7 : 0)
         }
-        .frame(width: size, height: size)
-        .background(                                                  // wood bore the cap is set into
-            Circle().fill(tone.dark.opacity(0.96)
-                .shadow(.inner(color: .black.opacity(0.6), radius: 2.5, y: 1.2)))
-        )
-        .overlay(Circle().strokeBorder(tone.dark, lineWidth: 1.5))
-        .overlay(Circle().stroke(.black.opacity(0.38), lineWidth: 0.75))
-        .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 1)
-            .mask(LinearGradient(colors: [.clear, .black], startPoint: .center, endPoint: .bottom))
-            .offset(y: 0.7))
+        // Metal cap inlaid into a light metal mounting plate, bored into the wood
+        // (same treatment as the knobs).
+        .knobInlay(size: size, tone: tone)
     }
 }
 

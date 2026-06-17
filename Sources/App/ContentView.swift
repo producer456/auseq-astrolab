@@ -6,39 +6,36 @@ import AVFoundation
 struct SoundBrowserWheel: View {
     @ObservedObject var model: AppModel
     var size: CGFloat = 88
-    @State private var browseIndex = 0
-    @State private var dragStartIndex: Int?
 
     private var instruments: [AVAudioUnitComponent] { model.browser.instruments }
 
     var body: some View {
-        let count = instruments.count
-        let idx = count > 0 ? min(max(0, browseIndex), count - 1) : 0
-        let title = count > 0 ? instruments[idx].name : (model.selectedTrack?.instrumentName ?? "—")
-        let sub = count > 0 ? "\(idx + 1)/\(count) · tap to load" : "no sounds"
+        let loaded = model.selectedTrack?.instrumentName
+        let hasInst = model.selectedTrack?.hasInstrument ?? false
+        let title = hasInst ? (loaded ?? "—") : "LOAD"
+        let sub = instruments.isEmpty ? "no sounds"
+                                      : (hasInst ? "tap to change sound" : "tap to load a sound")
 
-        NavWheel(title: title, subtitle: sub, glyph: "waveform",
-                 lit: model.selectedTrack?.hasInstrument ?? false, size: size)
-            .gesture(
-                DragGesture(minimumDistance: 4)
-                    .onChanged { v in
-                        guard count > 0 else { return }
-                        if dragStartIndex == nil { dragStartIndex = idx }
-                        let steps = Int(-v.translation.height / 22)
-                        browseIndex = ((dragStartIndex! + steps) % count + count) % count
+        // The wheel IS the plugin loader for the selected track — pick a sound and
+        // it loads onto whatever track is selected (no need to load one first).
+        Menu {
+            if instruments.isEmpty {
+                Text("No AUv3 instruments found")
+            } else if let track = model.selectedTrack {
+                Section("Load onto \(track.name)") {
+                    ForEach(Array(instruments.enumerated()), id: \.offset) { _, inst in
+                        Button {
+                            model.assignInstrument(inst, to: track)
+                        } label: {
+                            if hasInst && inst.name == loaded { Label(inst.name, systemImage: "checkmark") }
+                            else { Text(inst.name) }
+                        }
                     }
-                    .onEnded { _ in dragStartIndex = nil }
-            )
-            .onTapGesture {
-                guard count > 0, let track = model.selectedTrack else { return }
-                model.assignInstrument(instruments[idx], to: track)
-            }
-            .onAppear {
-                if let name = model.selectedTrack?.instrumentName,
-                   let i = instruments.firstIndex(where: { $0.name == name }) {
-                    browseIndex = i
                 }
             }
+        } label: {
+            NavWheel(title: title, subtitle: sub, glyph: "waveform", lit: hasInst, size: size)
+        }
     }
 }
 
@@ -72,6 +69,10 @@ struct ContentView: View {
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showingPluginUI = false } } }
                 }
+                // Resizable by the user — drag between sizes.
+                .presentationDetents([.height(360), .medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationContentInteraction(.resizes)
             }
         }
         .sheet(isPresented: $showingTracks) {
