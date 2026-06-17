@@ -6,9 +6,19 @@ struct TransportBar: View {
     @ObservedObject var seq: Sequencer
     var onQuantizeSelected: () -> Void = {}
     var onQuantizeAll: () -> Void = {}
+    var compact: Bool = false
 
     var body: some View {
-        HStack(spacing: 16) {
+        if compact {
+            ScrollView(.horizontal, showsIndicators: false) { controls }
+                .background(Theme.rail)
+        } else {
+            controls.background(Theme.rail)
+        }
+    }
+
+    private var controls: some View {
+        HStack(spacing: compact ? 12 : 16) {
             // Stop
             transportButton(system: "stop.fill", active: false, tint: Theme.etched) {
                 seq.stop()
@@ -40,7 +50,7 @@ struct TransportBar: View {
                 }
             }
 
-            Spacer()
+            if !compact { Spacer() }
 
             // Loop on/off (off = linear play-through)
             Button { seq.loopEnabled.toggle() } label: {
@@ -101,7 +111,6 @@ struct TransportBar: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
-        .background(Theme.rail)
     }
 
     private func transportButton(system: String, active: Bool, tint: Color,

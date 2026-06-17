@@ -10,6 +10,7 @@ struct PianoKeyboardView: View {
     @ObservedObject var model: AppModel
     var startNote: Int = 48      // C3
     var octaves: Int = 2
+    var height: CGFloat = 200
 
     @State private var pressed: Set<UInt8> = []
 
@@ -18,7 +19,7 @@ struct PianoKeyboardView: View {
             ledStrip.frame(height: 12)
             keysView
         }
-        .frame(height: 200)
+        .frame(height: height)
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 12)
