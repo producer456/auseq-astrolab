@@ -178,9 +178,9 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        let well: CGFloat = isPhone ? 34 : 40
-        let icon: CGFloat = isPhone ? 14 : 16
-        return VStack(spacing: isPhone ? 6 : 8) {
+        let well: CGFloat = isPhone ? 32 : 36
+        let icon: CGFloat = isPhone ? 13 : 15
+        return VStack(spacing: isPhone ? 3 : 4) {
             // Slim control strip: branding + utilities, milled into the wood
             HStack(spacing: isPhone ? 8 : 12) {
                 if isPhone {
@@ -240,18 +240,18 @@ struct ContentView: View {
             }
             // The "screen" — big nav wheel; on iPad it's flanked by 8 inlaid param knobs.
             if isPhone {
-                SoundBrowserWheel(model: model, size: 104)
+                SoundBrowserWheel(model: model, size: 92)
             } else {
-                WheelKnobDeck(model: model, tone: woodTone, wheelSize: 150)
+                WheelKnobDeck(model: model, tone: woodTone, wheelSize: 130)
             }
             if !isPhone {
-                Text(midiSummary).font(Theme.mono(9, .medium)).tracking(1)
-                    .foregroundStyle(woodTone.ink.opacity(0.65))
+                Text(midiSummary).font(Theme.mono(8.5, .medium)).tracking(1)
+                    .foregroundStyle(woodTone.ink.opacity(0.6))
             }
         }
         .padding(.horizontal, isPhone ? 12 : 16)
-        .padding(.top, isPhone ? 8 : 12)
-        .padding(.bottom, isPhone ? 6 : 8)
+        .padding(.top, isPhone ? 5 : 7)
+        .padding(.bottom, isPhone ? 3 : 5)
         .frame(maxWidth: .infinity)
     }
 

@@ -104,7 +104,7 @@ struct TransportBar: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 9)
+        .padding(.horizontal, 16).padding(.vertical, 5)
     }
 
     private func iconToggle(_ system: String, on: Bool, action: @escaping () -> Void) -> some View {
