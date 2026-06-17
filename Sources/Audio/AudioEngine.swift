@@ -7,7 +7,7 @@ import AudioToolbox
 @MainActor
 final class AudioEngine: ObservableObject {
 
-    let engine = AVAudioEngine()
+    private(set) var engine = AVAudioEngine()
 
     private struct TrackAudio {
         let unit: AVAudioUnit
@@ -22,7 +22,7 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var loadingTrackIDs: Set<UUID> = []
 
     // Metronome click — a player node fed short enveloped sine bursts.
-    private let clickPlayer = AVAudioPlayerNode()
+    private var clickPlayer = AVAudioPlayerNode()
     private let clickFormat = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
     private var clickHi: AVAudioPCMBuffer?
     private var clickLo: AVAudioPCMBuffer?
@@ -234,13 +234,23 @@ final class AudioEngine: ObservableObject {
     /// Tear down every track's nodes with a single engine stop/start — used when
     /// loading a song, to avoid churning the engine once per track (which can
     /// trip AVAudioEngine assertions).
+    /// Tear down ALL tracks for a song load by replacing the whole AVAudioEngine
+    /// with a fresh instance. Detaching a running out-of-process AUv3 and
+    /// restarting the shared engine can leave dangling render state that aborts
+    /// the audio thread (an uncatchable C++ crash). A brand-new engine has none
+    /// of that state, so this is the reliable reset.
     func removeAllTracks() {
-        crumb("AE.removeAll: stop (\(hosts.count) hosts)")
-        if engine.isRunning { engine.stop(); clickNeedsRestart = true }
-        for id in Array(hosts.keys) { removeHostNodes(id) }
-        crumb("AE.removeAll: start")
-        start()
-        crumb("AE.removeAll: done")
+        crumb("AE.reset: stop (\(hosts.count) hosts)")
+        engine.stop()
+        hosts.removeAll()                     // drop refs; their nodes die with the old engine
+
+        engine = AVAudioEngine()              // fresh graph, no dangling state
+        clickPlayer = AVAudioPlayerNode()     // nodes belong to one engine — make a new one
+        clickReady = false
+        clickNeedsRestart = true
+        crumb("AE.reset: fresh engine, restarting")
+        start()                               // realizes mainMixer + re-attaches the click on the new engine
+        crumb("AE.reset: done")
     }
 
     func hasInstrument(_ trackID: UUID) -> Bool { hosts[trackID] != nil }

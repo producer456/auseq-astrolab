@@ -46,7 +46,13 @@ final class Sequencer: ObservableObject {
     // Tempo / grid
     @Published var bpm = 120.0 {
         didSet {
-            bpm = min(300, max(20, bpm))
+            // Clamp WITHOUT unconditional self-assignment: writing `bpm` inside its
+            // own didSet re-invokes the @Published setter, so an unconditional
+            // `bpm = …` recurses forever (stack overflow). Only re-assign when the
+            // value is actually out of range — that re-entry lands in-range and
+            // stops immediately.
+            let clamped = min(300, max(20, bpm))
+            if bpm != clamped { bpm = clamped; return }
             if isPlaying { anchorBeat = positionBeats; anchorDate = Date() }   // re-base so tempo change doesn't jump
         }
     }
