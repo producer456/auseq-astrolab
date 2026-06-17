@@ -5,6 +5,7 @@ import AVFoundation
 /// the wheel screen), tap to load the highlighted sound onto the selected track.
 private struct SoundBrowserWheel: View {
     @ObservedObject var model: AppModel
+    var size: CGFloat = 88
     @State private var browseIndex = 0
     @State private var dragStartIndex: Int?
 
@@ -17,7 +18,7 @@ private struct SoundBrowserWheel: View {
         let sub = count > 0 ? "\(idx + 1)/\(count) · tap to load" : "no sounds"
 
         NavWheel(title: title, subtitle: sub, glyph: "waveform",
-                 lit: model.selectedTrack?.hasInstrument ?? false, size: 88)
+                 lit: model.selectedTrack?.hasInstrument ?? false, size: size)
             .gesture(
                 DragGesture(minimumDistance: 4)
                     .onChanged { v in
@@ -44,11 +45,34 @@ private struct SoundBrowserWheel: View {
 struct ContentView: View {
     @StateObject private var model = AppModel()
     @State private var showingConfig = false
+    @State private var showingTracks = false
     @State private var mainMode: MainMode = .params
+    @Environment(\.horizontalSizeClass) private var hSize
 
     enum MainMode: String, CaseIterable { case params = "PARAMS", arrange = "ARRANGE" }
+    private var isPhone: Bool { hSize == .compact }
 
     var body: some View {
+        Group {
+            if isPhone { phoneBody } else { padBody }
+        }
+        .tint(Theme.orange)
+        .preferredColorScheme(.light)
+        .sheet(isPresented: $showingConfig) {
+            ConfigurationView(model: model)
+        }
+        .sheet(isPresented: $showingTracks) {
+            NavigationStack {
+                TrackListView(model: model)
+                    .navigationTitle("Tracks")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showingTracks = false } } }
+            }
+        }
+    }
+
+    /// iPad — track list as a fixed sidebar between wood cheeks.
+    private var padBody: some View {
         ZStack {
             BrushedAluminum()
             HStack(spacing: 0) {
@@ -61,10 +85,13 @@ struct ContentView: View {
                 WoodPanel().frame(width: 16).ignoresSafeArea()
             }
         }
-        .tint(Theme.orange)
-        .preferredColorScheme(.light)
-        .sheet(isPresented: $showingConfig) {
-            ConfigurationView(model: model)
+    }
+
+    /// Phone — single column; tracks open in a drawer from the top bar.
+    private var phoneBody: some View {
+        ZStack {
+            BrushedAluminum()
+            mainArea
         }
     }
 
@@ -109,13 +136,18 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: isPhone ? 10 : 16) {
+            if isPhone {
+                Button { showingTracks = true } label: {
+                    Image(systemName: "list.bullet").font(.title3).foregroundStyle(Theme.orange)
+                }
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text("ASTROLAB")
-                    .font(Theme.mono(24, .heavy))
-                    .tracking(3)
+                    .font(Theme.mono(isPhone ? 16 : 24, .heavy))
+                    .tracking(isPhone ? 1.5 : 3)
                     .foregroundStyle(Theme.etched)
-                Text(midiSummary).etchedLabel(9, soft: true, weight: .medium)
+                if !isPhone { Text(midiSummary).etchedLabel(9, soft: true, weight: .medium) }
             }
             Button { showingConfig = true } label: {
                 Image(systemName: "gearshape.fill")
@@ -123,9 +155,9 @@ struct ContentView: View {
             }
             Spacer()
             // Navigation wheel — scroll to browse sounds, tap to load
-            SoundBrowserWheel(model: model)
+            SoundBrowserWheel(model: model, size: isPhone ? 66 : 88)
         }
-        .padding()
+        .padding(.horizontal, isPhone ? 12 : 16).padding(.vertical, isPhone ? 8 : 16)
     }
 
     private var midiSummary: String {
