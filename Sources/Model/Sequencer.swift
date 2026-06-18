@@ -383,7 +383,11 @@ final class Sequencer: ObservableObject {
             for e in events where e.time > a && e.time <= b {
                 onEvent?(e, tid)
                 if e.isOn { active.append((e.note, tid)) }
-                else { active.removeAll { $0.note == e.note && $0.track == tid } }
+                // Remove only ONE matching active note, so overlapping same-pitch
+                // notes (e.g. after paste) don't all get killed by a single note-off.
+                else if let i = active.firstIndex(where: { $0.note == e.note && $0.track == tid }) {
+                    active.remove(at: i)
+                }
             }
         }
     }

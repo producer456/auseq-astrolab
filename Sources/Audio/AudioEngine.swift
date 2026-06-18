@@ -18,6 +18,9 @@ final class AudioEngine: ObservableObject {
     }
 
     private var hosts: [UUID: TrackAudio] = [:]
+    /// Bumped whenever the whole engine is rebuilt (song load). In-flight async
+    /// instantiate completions check it and bail if they belong to a prior engine.
+    private var loadGeneration = 0
     @Published var lastError: String?
     @Published private(set) var loadingTrackIDs: Set<UUID> = []
 
@@ -115,11 +118,13 @@ final class AudioEngine: ObservableObject {
         loadingTrackIDs.insert(trackID)
         let desc = component.audioComponentDescription
         let name = component.name
+        let gen = loadGeneration
 
         AVAudioUnit.instantiate(with: desc, options: [.loadOutOfProcess]) { [weak self] unit, error in
             Task { @MainActor in
                 guard let self else { return }
                 self.loadingTrackIDs.remove(trackID)
+                guard gen == self.loadGeneration else { return }   // engine was rebuilt under us
                 if let error {
                     self.lastError = "Load \(name): \(error.localizedDescription)"
                     return
@@ -142,10 +147,12 @@ final class AudioEngine: ObservableObject {
                         for trackID: UUID,
                         completion: @escaping (String) -> Void) {
         loadingTrackIDs.insert(trackID)
+        let gen = loadGeneration
         AVAudioUnit.instantiate(with: desc, options: [.loadOutOfProcess]) { [weak self] unit, error in
             Task { @MainActor in
                 guard let self else { return }
                 self.loadingTrackIDs.remove(trackID)
+                guard gen == self.loadGeneration else { return }   // engine was rebuilt under us
                 if let error {
                     self.lastError = "Load \(name): \(error.localizedDescription)"
                     return
@@ -158,13 +165,14 @@ final class AudioEngine: ObservableObject {
                 self.attach(unit, name: name, desc: desc, to: trackID)
                 completion(name)
                 // Restore the saved patch only AFTER the unit is attached and the
-                // engine is running, on a later runloop turn. Setting fullState on
-                // a just-instantiated unit can put it in a state that aborts when
-                // the engine allocates render resources — deferring is safer. Wrap
-                // in @try/@catch for any ObjC throw (the C++ abort case is logged
-                // via the breadcrumb written just before).
+                // engine is running, on a later runloop turn. Re-check the generation
+                // AND that this unit is still the live host for the track (it may have
+                // been replaced/rebuilt in the meantime) — restoring into a detached
+                // out-of-process unit can abort.
                 if let fullState {
                     DispatchQueue.main.async {
+                        guard gen == self.loadGeneration,
+                              self.hosts[trackID]?.unit === unit else { return }
                         crumb("AE: applying fullState to \(name)")
                         if let err = AUSeqTryCatch({ unit.auAudioUnit.fullState = fullState }) {
                             self.lastError = "Restore patch \(name): \(err.localizedDescription)"
@@ -241,8 +249,19 @@ final class AudioEngine: ObservableObject {
     /// of that state, so this is the reliable reset.
     func removeAllTracks() {
         crumb("AE.reset: stop (\(hosts.count) hosts)")
+        loadGeneration &+= 1                   // invalidate any in-flight instantiate completions
         engine.stop()
-        hosts.removeAll()                     // drop refs; their nodes die with the old engine
+        // Explicitly detach nodes before discarding the engine — dropping refs alone
+        // doesn't deterministically tear down an out-of-process AUv3's render state.
+        _ = AUSeqTryCatch {
+            for h in self.hosts.values {
+                self.engine.disconnectNodeOutput(h.unit)
+                self.engine.disconnectNodeOutput(h.mixer)
+                self.engine.detach(h.unit)
+                self.engine.detach(h.mixer)
+            }
+        }
+        hosts.removeAll()
 
         engine = AVAudioEngine()              // fresh graph, no dangling state
         clickPlayer = AVAudioPlayerNode()     // nodes belong to one engine — make a new one
@@ -265,9 +284,16 @@ final class AudioEngine: ObservableObject {
         hosts[trackID]?.desc
     }
 
-    /// The loaded instrument's full state / patch (for saving a song).
+    /// The loaded instrument's full state / patch (for saving a song). Some
+    /// plugins throw from the getter — contain it so Save can't crash.
     func fullState(for trackID: UUID) -> [String: Any]? {
-        hosts[trackID]?.unit.auAudioUnit.fullState
+        guard let au = hosts[trackID]?.unit.auAudioUnit else { return nil }
+        var state: [String: Any]?
+        if let err = AUSeqTryCatch({ state = au.fullState }) {
+            diag("audio", "fullState read threw: \(err.localizedDescription)")
+            return nil
+        }
+        return state
     }
 
     // MARK: - Mixer control

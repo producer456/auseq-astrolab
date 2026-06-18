@@ -177,6 +177,7 @@ final class AppModel: ObservableObject {
         audio.loadInstrument(component, for: track.id) { [weak self] name in
             track.instrumentName = name
             track.hasInstrument = true
+            track.instrumentGen += 1
             self?.paramBank = 0
             self?.syncBrowseToSelection()
             // ContentView observes AppModel, not the individual Track, so the
@@ -347,7 +348,7 @@ final class AppModel: ObservableObject {
             tracks.append(track)
 
             crumb("track \(i): load \(td.notes.count) notes")
-            sequencer.loadClip(td.notes.map {
+            sequencer.loadClip(td.notes.filter { $0.time.isFinite }.map {   // drop corrupt NaN/inf times
                 Sequencer.NoteEvent(time: $0.time, note: $0.note, velocity: $0.velocity, isOn: $0.isOn)
             }, for: track.id)
 
@@ -376,8 +377,7 @@ final class AppModel: ObservableObject {
             addTrack()
         } else {
             let idx = min(max(0, doc.selectedTrackIndex ?? 0), tracks.count - 1)
-            selectedTrackID = tracks[idx].id
-            setArmed(tracks[idx])
+            select(tracks[idx])   // resets paramBank + browse pointer to match the selection
         }
         objectWillChange.send()
         crumb("loadSong returned OK (instruments may still be attaching)")
@@ -455,7 +455,7 @@ final class AppModel: ObservableObject {
     /// track's parameter N (the same order shown in the parameter list).
     private func handleController(_ message: MIDIMessage) {
         switch message {
-        case let .controlChange(cc, value, _) where (16...24).contains(cc):
+        case let .controlChange(cc, value, _) where (16...23).contains(cc):   // 8 encoders = the 8 wood knobs
             let index = Int(cc) - 16
             let delta = value < 0x40 ? Int(value) : -(Int(value) - 0x40)   // MCU relative
             nudgeParameter(index, by: delta)
@@ -478,17 +478,20 @@ final class AppModel: ObservableObject {
             case 91: stepPreset(-1)            // MCU Rewind ◀◀ → previous preset
             case 92: stepPreset(1)             // MCU Forward ▶▶ → next preset
             case 24...31: selectTrackByIndex(Int(note) - 24)  // MCU Select buttons under faders
-            case 0x65, 0x54: browseCommit()  // big-knob press (best guess: MCU scrub/zoom) → load browsed sound
-            default: diag("ctrl", "note \(note) v\(velocity)")  // log unmapped notes (helps ID the big-knob press)
+            // NOTE: the big-knob press note is not yet confirmed. Mapping a guess here
+            // is destructive (it would load a sound onto the selected track), so until
+            // it's captured via Diagnostics we only log it. Set bigKnobPressNote then map.
+            default: diag("ctrl", "note \(note) v\(velocity)")  // log unmapped notes (ID the big-knob press here)
             }
         default:
             break
         }
     }
 
-    /// Fader (channel 0…8) → the matching track's volume.
+    /// Channel fader (0…7) → the matching track's volume. Channel 8 is the MCU
+    /// master fader — ignored here (not a track).
     private func setFaderVolume(channel: Int, value: Float) {
-        guard channel >= 0, channel < tracks.count else { return }
+        guard channel >= 0, channel < 8, channel < tracks.count else { return }
         setVolume(value, for: tracks[channel])
     }
 

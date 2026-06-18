@@ -18,6 +18,7 @@ Cross-pollination with Legion Stage (`stage-ipad`) is underway. Done in v2.1 so 
 - **Pass 2 (Stage ← AUSeq):** port AUSeq's ripple cut/copy/erase/paste into `stage-ipad`'s arranger (**flag before modifying that separate project**).
 - **Deferred — true MIDI 2.0 high-res** ("option A"): 16-bit vel / 32-bit CC / per-note. Scoped decision, touches the working KeyLab MCU decode + AU output path.
 - **Dropped (David, 2026-06-17):** scenes / clip-launch — not wanted.
+- **Bug-review deferred items (2026-06-17, 4-agent pass).** Fixed: 9th-encoder range, removed guessed destructive jog-press, master-fader (ch8) ignore, audio load-generation guard + detach-before-engine-swap + fullState getter/setter guards, loadSong via select(), per-track-load-counter knob key, edit-overlay reset on bank page, hung-note on overlapping same-pitch, NaN-time filter on load. STILL OPEN (lower risk / pre-existing): (a) loop-seam hard-flush re-triggers notes sustained across the seam (click on pads) + quantize overwrites same-pitch open note (drops fast repeats) + overdub-across-seam inverts a note pair — all touch core `tick()`/`quantize`, defer until needed; (b) paste/loadClip + loop region not clamped to `totalBeats` (hung note only on non-looping play-to-end); (c) preset checkmark/name can be stale if the AU doesn't echo `currentPreset` (presetFlash is the reliable readout); (d) **jog turn CC 60 + press note are unverified guesses** — capture real messages via ⚙️→Diagnostics on hardware, then set `bigKnobPressNote` and confirm the turn CC.
 
 ## ▶ v1.0 SHIPPED (2026-06-16)
 

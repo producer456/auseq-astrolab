@@ -20,9 +20,10 @@ struct WheelKnobDeck: View {
         if let au = model.selectedAU {
             BoundKnobDeck(au: au, model: model, tone: tone, wheelSize: wheelSize,
                           knobSize: knobSize, spacing: spacing, reservedHeight: reservedHeight)
-                // Rebuild the param VM when the AU instance changes — i.e. on track
-                // change AND when a different plugin is loaded onto the same track.
-                .id(ObjectIdentifier(au))
+                // Rebuild the param VM on track change AND when a plugin is (re)loaded
+                // on the same track. Keyed on a per-track load counter rather than the
+                // AU's heap address (which can be reused after dealloc).
+                .id("\(model.selectedTrackID?.uuidString ?? "-")#\(model.selectedTrack?.instrumentGen ?? 0)")
         } else {
             HStack(alignment: .center, spacing: spacing) {
                 ForEach(0..<4, id: \.self) { _ in emptyWell }
@@ -69,6 +70,7 @@ private struct BoundKnobDeck: View {
         }
         .animation(.easeOut(duration: 0.12), value: editing)
         .animation(.easeOut(duration: 0.15), value: model.presetFlash)
+        .onChange(of: model.paramBank) { _ in editing = nil }   // knobs swap params; drop a stuck overlay
     }
 
     /// The big screen: shows the instrument browser normally, and the live param
