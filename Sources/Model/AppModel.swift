@@ -514,7 +514,8 @@ final class AppModel: ObservableObject {
             case 89: toggleMetronome()       // Metronome on/off
             case 88: presetUp()              // Preset up
             case 87: presetDown()            // Preset down
-            default: diag("ctrl", "note \(note) v\(velocity)")  // log any still-unmapped notes (e.g. big-knob press)
+            case 84: browseCommit()          // big-knob press → load the browsed sound (note confirmed via Monitor)
+            default: diag("ctrl", "note \(note) v\(velocity)")  // log any still-unmapped notes
             }
         default:
             break
