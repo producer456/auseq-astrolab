@@ -104,6 +104,7 @@ struct ArrangeView: View {
                     .foregroundStyle(seq.selectionAllTracks ? Theme.orange : Theme.etchedSoft)
             }
             Divider().frame(height: 18)
+            tool("Undo", "arrow.uturn.backward", enabled: seq.canUndo) { seq.undo() }
             tool("Cut", "scissors", enabled: seq.hasSelection) { model.editCut() }
             tool("Copy", "doc.on.doc", enabled: seq.hasSelection) { model.editCopy() }
             tool("Paste", "doc.on.clipboard", enabled: seq.hasClipboard) { model.editPaste() }

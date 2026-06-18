@@ -139,12 +139,14 @@ final class Sequencer: ObservableObject {
 
     func eraseSelection(allTrackIDs: [UUID]) {
         guard hasSelection else { return }
+        pushUndo()
         for tid in targetIDs(allTrackIDs) { removeNotes(tid, from: selStartBeat, to: selEndBeat) }
         refreshContent(); objectWillChange.send()
     }
 
     func cutSelection(allTrackIDs: [UUID]) {
         guard hasSelection else { return }
+        pushUndo()
         copySelection(allTrackIDs: allTrackIDs)
         let ids = targetIDs(allTrackIDs)
         let a = selStartBeat
@@ -177,6 +179,7 @@ final class Sequencer: ObservableObject {
 
     func pasteClipboard(selectedTrackID: UUID?) {
         guard hasClipboard else { return }
+        pushUndo()
         let at = max(0, positionBeats)
         let single = clipboard.count == 1 && !selectionAllTracks
         for (origID, notes) in clipboard {
@@ -206,6 +209,7 @@ final class Sequencer: ObservableObject {
 
     func play() {
         guard !isPlaying else { return }
+        if isRecordArmed { pushUndo() }   // snapshot before a record take so it can be undone
         let startBeat: Double
         if loopEnabled && hasLoopRegion {
             startBeat = loopStartBeat
@@ -254,7 +258,32 @@ final class Sequencer: ObservableObject {
     }
 
     func clear() {
+        pushUndo()
         clips.removeAll(); quantizeDelta.removeAll(); hasContent = false
+    }
+
+    // MARK: - Undo (snapshot of all clips before each destructive edit / record take)
+
+    private var undoStack: [[UUID: [NoteEvent]]] = []
+    private let undoLimit = 40
+    var canUndo: Bool { !undoStack.isEmpty }
+
+    func pushUndo() {
+        undoStack.append(clips)
+        if undoStack.count > undoLimit { undoStack.removeFirst() }
+    }
+
+    func undo() {
+        guard let prev = undoStack.popLast() else { return }
+        clips = prev
+        refreshContent()
+        objectWillChange.send()
+        diag("seq", "undo (\(undoStack.count) left)")
+    }
+
+    /// Move the playhead by whole bars (KeyLab ◀◀ / ▶▶ transport).
+    func seek(byBars delta: Int) {
+        seek(toBeat: positionBeats + Double(delta * beatsPerBar))
     }
 
     // MARK: - Persistence support
@@ -273,6 +302,7 @@ final class Sequencer: ObservableObject {
 
     func quantize(_ trackID: UUID) {
         guard let events = clips[trackID], !events.isEmpty else { return }
+        pushUndo()
         let g = quantizeGrid.beats
         var open: [UInt8: (time: Double, vel: UInt8)] = [:]
         var out: [NoteEvent] = []

@@ -172,6 +172,27 @@ final class AppModel: ObservableObject {
         assignInstrument(browser.instruments[browseIndex], to: track)
     }
 
+    // MARK: - KeyLab left-of-screen DAW buttons (bound once their notes are captured)
+
+    func undo() { sequencer.undo() }
+    func muteSelected() { if let t = selectedTrack { toggleMute(t) } }
+    func toggleAutoQuantize() { sequencer.quantizeOn.toggle() }
+    func toggleMetronome() { sequencer.metronomeOn.toggle() }
+    func presetUp() { stepPreset(1) }
+    func presetDown() { stepPreset(-1) }
+
+    /// Tap tempo — average the last few taps (resets after a >2s gap).
+    private var tapTimes: [Date] = []
+    func tapTempo() {
+        let now = Date()
+        tapTimes = tapTimes.filter { now.timeIntervalSince($0) < 2.0 }
+        tapTimes.append(now)
+        guard tapTimes.count >= 2 else { return }
+        let intervals = zip(tapTimes.dropFirst(), tapTimes).map { $0.timeIntervalSince($1) }
+        let avg = intervals.reduce(0, +) / Double(intervals.count)
+        if avg > 0.05 { sequencer.bpm = 60.0 / avg }   // bpm didSet clamps to [20,300]
+    }
+
     func assignInstrument(_ component: AVAudioUnitComponent, to track: Track) {
         diag("app", "load '\(component.name)' → \(track.name)")
         audio.loadInstrument(component, for: track.id) { [weak self] name in
@@ -475,8 +496,8 @@ final class AppModel: ObservableObject {
             case 94: sequencer.play()          // MCU Play
             case 93: sequencer.stop()          // MCU Stop
             case 95: sequencer.toggleRecord()  // MCU Record
-            case 91: stepPreset(-1)            // MCU Rewind ◀◀ → previous preset
-            case 92: stepPreset(1)             // MCU Forward ▶▶ → next preset
+            case 91: sequencer.seek(byBars: -1)   // MCU Rewind ◀◀ → playhead back one bar
+            case 92: sequencer.seek(byBars: 1)    // MCU Forward ▶▶ → playhead forward one bar
             case 24...31: selectTrackByIndex(Int(note) - 24)  // MCU Select buttons under faders
             // NOTE: the big-knob press note is not yet confirmed. Mapping a guess here
             // is destructive (it would load a sound onto the selected track), so until
