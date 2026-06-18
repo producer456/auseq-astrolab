@@ -175,7 +175,9 @@ struct WoodDeck: View {
     var tone: WoodTone = .oak
     var body: some View {
         ZStack {
-            LinearGradient(colors: [tone.light.opacity(0.96), tone.dark.opacity(0.94), tone.light.opacity(0.82)],
+            // Fully opaque so the light faceplate behind it can't bleed through and
+            // wash the wood out (that bleed read as a faint fog).
+            LinearGradient(colors: [tone.light, tone.dark, tone.light],
                            startPoint: .top, endPoint: .bottom)
             Canvas { ctx, size in
                 var y: CGFloat = 0
@@ -188,7 +190,8 @@ struct WoodDeck: View {
                 }
             }
             .blendMode(.multiply)
-            LinearGradient(colors: [.white.opacity(0.16), .clear, .white.opacity(0.05)],
+            // Lighter sheen so it reads as a finish, not haze.
+            LinearGradient(colors: [.white.opacity(0.07), .clear, .black.opacity(0.04)],
                            startPoint: .top, endPoint: .bottom)
                 .blendMode(.softLight)
             VStack(spacing: 0) {
