@@ -175,11 +175,17 @@ final class AppModel: ObservableObject {
     // MARK: - KeyLab left-of-screen DAW buttons (bound once their notes are captured)
 
     func undo() { sequencer.undo() }
-    func muteSelected() { if let t = selectedTrack { toggleMute(t) } }
+    func muteSelected() { if let t = selectedTrack { toggleMute(t) }; updateButtonLEDs() }
     func toggleAutoQuantize() { sequencer.quantizeOn.toggle() }
-    func toggleMetronome() { sequencer.metronomeOn.toggle() }
+    func toggleMetronome() { sequencer.metronomeOn.toggle(); updateButtonLEDs() }
     func presetUp() { stepPreset(1) }
     func presetDown() { stepPreset(-1) }
+
+    /// Light the KeyLab's Metro/Mute button LEDs to reflect current state.
+    func updateButtonLEDs() {
+        midi.send([0x90, 89, sequencer.metronomeOn ? 127 : 0], toPortNamed: "DAW")           // Metronome
+        midi.send([0x90, 16, (selectedTrack?.muted ?? false) ? 127 : 0], toPortNamed: "DAW") // Mute
+    }
 
     /// Tap tempo — average the last few taps (resets after a >2s gap).
     private var tapTimes: [Date] = []
@@ -499,10 +505,16 @@ final class AppModel: ObservableObject {
             case 91: sequencer.seek(byBars: -1)   // MCU Rewind ◀◀ → playhead back one bar
             case 92: sequencer.seek(byBars: 1)    // MCU Forward ▶▶ → playhead forward one bar
             case 24...31: selectTrackByIndex(Int(note) - 24)  // MCU Select buttons under faders
-            // NOTE: the big-knob press note is not yet confirmed. Mapping a guess here
-            // is destructive (it would load a sound onto the selected track), so until
-            // it's captured via Diagnostics we only log it. Set bigKnobPressNote then map.
-            default: diag("ctrl", "note \(note) v\(velocity)")  // log unmapped notes (ID the big-knob press here)
+            // KeyLab left-of-screen DAW buttons (notes captured via Button Learn)
+            case 80: saveSong()              // Save
+            case 16: muteSelected()          // Mute (selected track)
+            case 81: undo()                  // Undo
+            case 75: tapTempo()              // Tap tempo
+            case 0:  quantizeSelected()      // Quantize → apply to selected track
+            case 89: toggleMetronome()       // Metronome on/off
+            case 88: presetUp()              // Preset up
+            case 87: presetDown()            // Preset down
+            default: diag("ctrl", "note \(note) v\(velocity)")  // log any still-unmapped notes (e.g. big-knob press)
             }
         default:
             break
@@ -544,6 +556,7 @@ final class AppModel: ObservableObject {
             let on: UInt8 = (i == selected) ? 127 : 0
             midi.send([0x90, UInt8(24 + i), on], toPortNamed: "DAW")
         }
+        updateButtonLEDs()   // refresh Mute LED for the newly-selected track
     }
 
     private func nudgeParameter(_ encoderIndex: Int, by delta: Int) {
