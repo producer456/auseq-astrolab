@@ -92,8 +92,9 @@ private struct BoundKnobDeck: View {
     }
 
     @ViewBuilder private func knob(_ i: Int) -> some View {
-        if i < vm.parameters.count {
-            InlaidKnob(vm: vm, param: vm.parameters[i], tone: tone, size: knobSize, editing: $editing)
+        let idx = model.paramBank * AppModel.encoderCount + i   // current bank's params
+        if idx < vm.parameters.count {
+            InlaidKnob(vm: vm, param: vm.parameters[idx], tone: tone, size: knobSize, editing: $editing)
         } else {
             Circle().fill(.clear)
                 .frame(width: knobSize, height: knobSize)

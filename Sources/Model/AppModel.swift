@@ -107,9 +107,9 @@ final class AppModel: ObservableObject {
     func editErase() { sequencer.eraseSelection(allTrackIDs: tracks.map { $0.id }) }
     func editPaste() { sequencer.pasteClipboard(selectedTrackID: selectedTrackID) }
 
-    // MARK: - Encoder bank paging (9 encoders → a page of 9 params)
+    // MARK: - Param bank paging (8 on-screen knobs = one page; KeyLab encoders + Next/Prev drive it)
 
-    static let encoderCount = 9
+    static let encoderCount = 8
     /// Which page of parameters the KeyLab encoders currently drive.
     @Published var paramBank = 0
 
@@ -523,7 +523,7 @@ final class AppModel: ObservableObject {
     }
 
     private func nudgeParameter(_ encoderIndex: Int, by delta: Int) {
-        guard delta != 0,
+        guard delta != 0, encoderIndex < Self.encoderCount,   // 8 knobs/page; ignore a 9th encoder
               let au = selectedAU,
               let params = au.parameterTree?.allParameters else { return }
         let paramIndex = paramBank * Self.encoderCount + encoderIndex

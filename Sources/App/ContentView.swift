@@ -211,6 +211,23 @@ struct ContentView: View {
                     Button { showingPluginUI = true } label: {
                         InlaidMetalButton(system: "rectangle.inset.filled", lit: true, tint: Theme.orange, size: well, tone: woodTone)
                     }
+                    // Param bank stepper (when the plugin has >8 params) — paged here
+                    // or by the KeyLab Next/Prev; the 8 wood knobs follow it.
+                    if model.bankCount > 1 {
+                        HStack(spacing: 7) {
+                            Button { model.pageBank(-1) } label: {
+                                Image(systemName: "chevron.left").font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(model.paramBank == 0 ? Theme.etchedSoft : Theme.orange)
+                            }.disabled(model.paramBank == 0)
+                            Text("BANK \(model.paramBank + 1)/\(model.bankCount)")
+                                .font(Theme.mono(10, .bold)).foregroundStyle(Theme.etched)
+                            Button { model.pageBank(1) } label: {
+                                Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(model.paramBank >= model.bankCount - 1 ? Theme.etchedSoft : Theme.orange)
+                            }.disabled(model.paramBank >= model.bankCount - 1)
+                        }
+                        .metalInlayPill(tone: woodTone, hPad: 9, vPad: 7)
+                    }
                 }
                 Spacer()
                 // Wood finish toggle — LED glows the tone you'll switch TO
