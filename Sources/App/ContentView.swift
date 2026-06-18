@@ -233,9 +233,9 @@ struct ContentView: View {
             }
             // The "screen" — big nav wheel; on iPad it's flanked by 8 inlaid param knobs.
             if isPhone {
-                SoundBrowserWheel(model: model, size: 104).frame(height: 96)
+                SoundBrowserWheel(model: model, size: 116).frame(height: 104)
             } else {
-                WheelKnobDeck(model: model, tone: woodTone, wheelSize: 168, reservedHeight: 120)
+                WheelKnobDeck(model: model, tone: woodTone, wheelSize: 192, reservedHeight: 132)
             }
         }
         .padding(.horizontal, isPhone ? 12 : 16)

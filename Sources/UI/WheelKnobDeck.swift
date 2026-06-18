@@ -8,13 +8,13 @@ struct WheelKnobDeck: View {
     @ObservedObject var model: AppModel
     var tone: WoodTone
     var wheelSize: CGFloat
-    var knobSize: CGFloat = 54   // match the original params-section knob size
+    var knobSize: CGFloat = 64   // scaled up
     /// Vertical space the wheel row reserves — the wheel can be larger than this
     /// and overflow into the (empty) centre of the strip/transport above & below,
     /// so a bigger screen doesn't grow the wood panel.
-    var reservedHeight: CGFloat = 120
+    var reservedHeight: CGFloat = 128
 
-    private var spacing: CGFloat { 28 }
+    private var spacing: CGFloat { 24 }
 
     var body: some View {
         if let au = model.selectedAU {
@@ -68,6 +68,7 @@ private struct BoundKnobDeck: View {
             ForEach(4..<8, id: \.self) { knob($0) }
         }
         .animation(.easeOut(duration: 0.12), value: editing)
+        .animation(.easeOut(duration: 0.15), value: model.presetFlash)
     }
 
     /// The big screen: shows the instrument browser normally, and the live param
@@ -78,6 +79,11 @@ private struct BoundKnobDeck: View {
             if let editing {
                 NavWheel(title: editing.label, subtitle: editing.value, glyph: "dial.medium.fill",
                          lit: true, size: wheelSize, progress: editing.progress)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            } else if let preset = model.presetFlash {
+                NavWheel(title: preset, subtitle: "preset", glyph: "music.note.list",
+                         lit: true, size: wheelSize, progress: 1)
                     .allowsHitTesting(false)
                     .transition(.opacity)
             }

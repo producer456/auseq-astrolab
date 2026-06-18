@@ -128,7 +128,21 @@ final class AppModel: ObservableObject {
     func applyPreset(_ preset: AUAudioUnitPreset) {
         selectedAU?.currentPreset = preset
         paramBank = 0
+        flashPreset(preset.name)
         objectWillChange.send()
+    }
+
+    /// Briefly show a preset name on the big-knob screen when it's selected.
+    @Published var presetFlash: String?
+    private var presetFlashGen = 0
+    func flashPreset(_ name: String) {
+        presetFlash = name
+        presetFlashGen += 1
+        let gen = presetFlashGen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self, self.presetFlashGen == gen else { return }
+            self.presetFlash = nil
+        }
     }
 
     // MARK: - Sound browse (the big wheel — driven on-screen and by the KeyLab jog)
@@ -493,6 +507,7 @@ final class AppModel: ObservableObject {
         let idx = ((curIdx + delta) % presets.count + presets.count) % presets.count
         au.currentPreset = presets[idx]
         paramBank = 0
+        flashPreset(presets[idx].name)
         objectWillChange.send()
         diag("ctrl", "preset → \(presets[idx].name)")
     }
