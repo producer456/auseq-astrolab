@@ -6,6 +6,9 @@ import UIKit
 /// captures it, and produces a copyable summary to hand back for mapping (M5).
 struct ControllerLearnView: View {
     @ObservedObject var midi: MIDIManager
+    var title: String = "Controller Learn"
+    /// Each step = (label, instruction). Defaults to the M5 encoder/transport list.
+    var stepDefs: [(title: String, hint: String)] = ControllerLearnView.defaultSteps
 
     private struct Step: Identifiable {
         let id: Int
@@ -13,15 +16,31 @@ struct ControllerLearnView: View {
         let hint: String
     }
 
-    private let steps: [Step] = {
-        var s: [Step] = []
-        for i in 1...9 { s.append(Step(id: i - 1, title: "Encoder \(i)", hint: "Twist encoder \(i) a little.")) }
-        s.append(Step(id: 9,  title: "Transport ▶ Play",  hint: "Press PLAY."))
-        s.append(Step(id: 10, title: "Transport ◼ Stop",  hint: "Press STOP."))
-        s.append(Step(id: 11, title: "Transport ● Record", hint: "Press RECORD."))
-        s.append(Step(id: 12, title: "Fader 1", hint: "Move the first fader up and down."))
+    private var steps: [Step] {
+        stepDefs.enumerated().map { Step(id: $0.offset, title: $0.element.title, hint: $0.element.hint) }
+    }
+
+    static let defaultSteps: [(title: String, hint: String)] = {
+        var s: [(String, String)] = []
+        for i in 1...9 { s.append(("Encoder \(i)", "Twist encoder \(i) a little.")) }
+        s.append(("Transport ▶ Play",  "Press PLAY."))
+        s.append(("Transport ◼ Stop",  "Press STOP."))
+        s.append(("Transport ● Record", "Press RECORD."))
+        s.append(("Fader 1", "Move the first fader up and down."))
         return s
     }()
+
+    /// The 10 left-of-screen DAW buttons we want to map.
+    static let keylabButtonSteps: [(title: String, hint: String)] = [
+        ("Save",        "Press the SAVE button."),
+        ("Mute",        "Press the MUTE button."),
+        ("Undo",        "Press the UNDO button."),
+        ("Tap Tempo",   "Press the TAP (tempo) button."),
+        ("Quantize",    "Press the QUANTIZE button."),
+        ("Metronome",   "Press the METRO / CLICK button."),
+        ("Preset Up",   "Press the button you want for PRESET UP (any unused left button)."),
+        ("Preset Down", "Press the button you want for PRESET DOWN (any unused left button)."),
+    ]
 
     @State private var index = 0
     @State private var port: String?
@@ -37,7 +56,7 @@ struct ControllerLearnView: View {
 
     var body: some View {
         Group { if finished { summary } else { stepView } }
-            .navigationTitle("Controller Learn")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { portMenu }
@@ -141,7 +160,7 @@ struct ControllerLearnView: View {
     }
 
     private var summaryText: String {
-        var lines = ["AUSeq Controller Learn — \(port.map(shortPort) ?? "all ports")"]
+        var lines = ["AUSeq \(title) — \(port.map(shortPort) ?? "all ports")"]
         for step in steps {
             let v = captured[step.id].map { "\($0.decoded)  [\($0.hex)]" } ?? "(skipped)"
             lines.append("\(step.title): \(v)")

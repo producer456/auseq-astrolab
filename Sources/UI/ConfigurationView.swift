@@ -16,6 +16,12 @@ struct ConfigurationView: View {
                         Label("Controller Learn (guided)", systemImage: "checklist")
                     }
                     NavigationLink {
+                        ControllerLearnView(midi: model.midi, title: "KeyLab Button Learn",
+                                            stepDefs: ControllerLearnView.keylabButtonSteps)
+                    } label: {
+                        Label("KeyLab Button Learn (10 left buttons)", systemImage: "square.grid.3x3.topleft.filled")
+                    }
+                    NavigationLink {
                         MIDIMonitorView(midi: model.midi)
                     } label: {
                         Label("Raw MIDI Monitor", systemImage: "dot.radiowaves.left.and.right")
